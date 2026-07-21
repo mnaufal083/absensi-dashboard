@@ -1,0 +1,197 @@
+:root {
+  --hijau-tua: #1B3B2C;
+  --hijau-sidebar: #173423;
+  --hijau-aktif: #20492F;
+  --emas: #C9A24D;
+  --emas-teks: #EFDDA6;
+  --krem: #F1EAD9;
+  --krem-tepi: #D8CFB8;
+  --kartu-tepi: #E4DCC5;
+  --teks-utama: #1B3B2C;
+  --teks-sekunder: #5B5442;
+  --teks-muted: #8A8060;
+  --hijau-status-bg: #E4F0E6;
+  --hijau-status-teks: #2A6B3E;
+  --kuning-status-bg: #FBEFD3;
+  --kuning-status-teks: #8A6416;
+  --merah-teks: #B5472E;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  height: 100%;
+  overflow: hidden; /* halaman utama tidak ikut scroll — hanya .content di dalam yang scroll */
+}
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--krem);
+  color: var(--teks-utama);
+}
+h1, h2, h3, .judul-serif { font-family: Georgia, "Times New Roman", serif; }
+
+input, select, button { font-family: inherit; font-size: 13px; }
+input, select {
+  border: 1px solid var(--krem-tepi);
+  border-radius: 8px;
+  padding: 8px 11px;
+  background: #fff;
+}
+button {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-weight: 600;
+  border: none;
+}
+.btn-primer { background: var(--hijau-tua); color: #fff; }
+.btn-sekunder { background: #fff; color: var(--hijau-tua); border: 1px solid #C9B98A; }
+
+/* ---------------- TOPBAR ---------------- */
+.topbar {
+  background: var(--hijau-tua);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 3px solid var(--emas);
+}
+.topbar-left { display: flex; align-items: center; gap: 14px; }
+.brand-badge {
+  width: 38px; height: 38px; border-radius: 50%;
+  border: 1.5px solid var(--emas); color: var(--emas);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.brand-eyebrow { font-size: 10.5px; letter-spacing: 1px; color: var(--emas); margin: 0 0 2px; font-weight: 600; }
+.brand-title { font-size: 16px; font-weight: 700; color: #fff; margin: 0; font-family: Georgia, serif; }
+.topbar-right { display: flex; align-items: center; gap: 10px; color: #EDE6D3; font-size: 13px; }
+.dot-online { width: 7px; height: 7px; border-radius: 50%; background: #7FCE9E; display: inline-block; }
+.btn-keluar {
+  color: #fff; background: #2A4F3C; border-radius: 999px; padding: 6px 14px;
+  text-decoration: none; font-size: 12.5px;
+}
+
+/* ---------------- LAYOUT ---------------- */
+.layout { display: flex; height: calc(100vh - 66px); overflow: hidden; }
+.sidebar {
+  width: 210px; flex-shrink: 0; background: var(--hijau-sidebar);
+  padding: 12px 0; display: flex; flex-direction: column; gap: 1px;
+  height: 100%; overflow-y: auto; /* diam di tempat, tidak ikut scroll konten */
+}
+.nav-btn {
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  background: transparent; color: #C7D6CB; border-left: 3px solid transparent;
+  border-radius: 0; padding: 11px 16px; font-size: 13px; font-weight: 500;
+  transition: background-color .18s ease, color .18s ease, border-color .18s ease;
+}
+.nav-btn.active { background: var(--hijau-aktif); color: var(--emas-teks); border-left-color: var(--emas); }
+.nav-btn:not(.active):hover { background: rgba(255,255,255,0.05); color: #fff; }
+.content {
+  flex: 1; padding: 1.5rem 2rem; overflow-y: auto; height: 100%;
+}
+.content.animasi-masuk { animation: masukKonten .28s ease; }
+@keyframes masukKonten {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.loading-text { color: var(--teks-muted); font-size: 13px; }
+
+/* ---------------- LOGIN ---------------- */
+.login-body {
+  display: flex; align-items: center; justify-content: center; min-height: 100vh;
+  background: var(--krem);
+}
+.login-card {
+  background: #fff; border-radius: 14px; padding: 2.25rem 2rem; width: 340px;
+  text-align: center; border: 0.5px solid var(--kartu-tepi);
+}
+.login-badge {
+  width: 52px; height: 52px; border-radius: 50%; margin: 0 auto 14px;
+  border: 1.5px solid var(--emas); color: var(--hijau-tua); background: #FBF6E8;
+  display: flex; align-items: center; justify-content: center; font-size: 24px;
+}
+.login-eyebrow { font-size: 10.5px; letter-spacing: 1px; color: var(--emas-teks); background: var(--hijau-tua); border-radius: 999px; padding: 4px 10px; display: inline-block; margin-bottom: 12px; }
+.login-title { font-size: 18px; margin: 0 0 20px; color: var(--hijau-tua); }
+.login-form { display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.login-form label { font-size: 12px; color: var(--teks-sekunder); font-weight: 600; margin-top: 8px; }
+.login-form input { width: 100%; margin-top: 4px; }
+.login-form button { margin-top: 18px; background: var(--hijau-tua); color: #fff; }
+.login-error { background: #FBE6E1; color: var(--merah-teks); border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 12px; }
+.login-note { font-size: 11.5px; color: var(--teks-muted); margin-top: 16px; }
+
+/* ---------------- KARTU & TABEL UMUM ---------------- */
+.kartu {
+  background: #fff; border-radius: 10px; padding: 1.1rem 1.3rem;
+  border: 0.5px solid var(--kartu-tepi); margin-bottom: 14px;
+}
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.stat-angka { font-size: 24px; font-weight: 700; margin: 0; color: var(--hijau-tua); }
+.stat-label { font-size: 12px; color: var(--teks-sekunder); margin: 0 0 6px; }
+
+.tabel-wrap { border: 0.5px solid var(--kartu-tepi); border-radius: 10px; overflow: hidden; background: #fff; overflow-x: auto; }
+.tabel-header-baris { background: var(--hijau-tua); color: var(--emas-teks); font-weight: 600; font-size: 11px; letter-spacing: .3px; }
+.tabel-baris { border-top: 0.5px solid #EEE7D5; font-size: 13px; align-items: center; }
+.tabel-baris.diedit { background: #F3F8F4; }
+.tabel-baris:hover { background: #FBF7ED; cursor: pointer; }
+.tabel-header-baris, .tabel-baris { display: grid; padding: 9px 14px; }
+
+.badge {
+  border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 600; width: fit-content;
+}
+.badge-draf { background: var(--kuning-status-bg); color: var(--kuning-status-teks); }
+.badge-final { background: var(--hijau-status-bg); color: var(--hijau-status-teks); }
+
+.banner-warning {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--kuning-status-bg); border: 0.5px solid #E8D8A8; border-radius: 8px;
+  padding: 10px 16px; margin-bottom: 12px; font-size: 12.5px; color: var(--kuning-status-teks); font-weight: 600;
+}
+.banner-success {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--hijau-status-bg); border: 0.5px solid #C9E0CE; border-radius: 8px;
+  padding: 10px 16px; margin-bottom: 12px; font-size: 12.5px; color: var(--hijau-status-teks); font-weight: 600;
+}
+
+.subtab-row { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1.5px solid var(--kartu-tepi); }
+.subtab { border: none; background: transparent; padding: 9px 4px; font-size: 13px; font-weight: 600; color: var(--teks-muted); border-bottom: 2.5px solid transparent; margin-bottom: -2px; margin-right: 18px; border-radius: 0; }
+.subtab.active { color: var(--hijau-tua); border-bottom-color: var(--emas); }
+
+.dropzone {
+  border: 1.5px dashed #C9B98A; border-radius: 12px; padding: 2.25rem 1rem;
+  text-align: center; margin-bottom: 18px; background: #fff;
+  transition: background-color .15s, border-color .15s;
+}
+.dropzone.drag-aktif {
+  background: #FBF3DC;
+  border-color: var(--emas);
+  border-style: solid;
+}
+.daftar-file-scroll {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 0.5px solid var(--kartu-tepi);
+  border-radius: 10px;
+  background: #fff;
+}
+.progress-track {
+  height: 8px; background: var(--krem); border-radius: 4px; overflow: hidden;
+}
+.progress-fill {
+  height: 100%; background: var(--emas); border-radius: 4px; transition: width .2s ease;
+}
+
+.icon-langkah {
+  width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--emas);
+  color: var(--emas); font-size: 11px; font-weight: 700; display: flex;
+  align-items: center; justify-content: center; flex-shrink: 0;
+}
+
+.tooltip-chart {
+  position: fixed; background: var(--hijau-tua); color: #fff; font-size: 12px;
+  padding: 6px 11px; border-radius: 7px; pointer-events: none; z-index: 9999;
+  opacity: 0; transition: opacity .12s ease; white-space: nowrap;
+}
+.tooltip-chart.tampil { opacity: 1; }
+.segmen-donut { cursor: pointer; transition: stroke-width .15s ease, opacity .15s ease; }

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Masuk — Sistem Rekapitulasi Absensi</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-badge">⚖</div>
+    <p class="login-eyebrow">KEJAKSAAN TINGGI JAWA TENGAH — BIDANG DASKRIMTI</p>
+    <h1 class="login-title">Sistem Rekapitulasi Absensi</h1>
+
+    {% if error %}
+    <div class="login-error">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for('login') }}" class="login-form">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autofocus />
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required />
+
+      <button type="submit">Masuk</button>
+    </form>
+    <p class="login-note">Akun dikelola oleh 3 admin internal Bidang Daskrimti.</p>
+  </div>
+</body>
+</html>
