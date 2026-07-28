@@ -4,12 +4,38 @@ extractor.py
 ------------
 Modul pembaca PDF "LAPORAN KEHADIRAN PEGAWAI" - Kejaksaan Tinggi Jawa Tengah.
 
-Dikalibrasi berdasarkan contoh PDF asli (format sistem absensi instansi):
-tabel dengan 16 kolom tetap (NO, NAMA PEGAWAI, NIP, NRP, GOL, TANGGAL,
-JAM KERJA MASUK, JAM KERJA PULANG, JAM MASUK, JAM KELUAR, DATANG AWAL,
-DATANG TELAT, PULANG AWAL, PULANG TELAT, JML JAM KERJA, KETERANGAN),
-diikuti blok ringkasan statistik kehadiran (Terlambat, Alpha, Sakit, dst)
-di baris/halaman terakhir setiap pegawai.
+CATATAN PENTING (hasil kalibrasi terhadap beberapa PDF asli):
+
+1) pdfplumber TIDAK konsisten membagi kolom pada tabel ini - baik jumlah
+   kolom maupun letak sel kosong ekstra bisa berbeda antar baris DAN antar
+   file (bukan cuma antar file). Karena itu:
+   - 10 kolom TERAKHIR tiap baris data harian TERBUKTI selalu konsisten
+     urutannya -> dibaca dengan indeks negatif (row[-10:]).
+   - Identitas pegawai (No/Nama/NIP/NRP/Golongan) TIDAK dicari lewat posisi
+     tetap ataupun posisi relatif ke Tanggal (keduanya terbukti masih bisa
+     salah - misalnya Nama pernah tertukar terbaca sebagai NIP karena ada
+     1 sel kosong ekstra yang tidak selalu muncul). Sebagai gantinya,
+     NIP dicari lewat POLA ANGKA 18 DIGIT (format baku NIP PNS Indonesia),
+     lalu Nama/NRP/Golongan dihitung relatif terhadap posisi NIP itu -
+     jauh lebih stabil karena isinya (bukan posisinya) yang dikenali.
+
+2) Atas arahan pembimbing: kolom "Datang Awal", "Datang Telat", "Pulang
+   Awal", "Pulang Telat", "Jml Jam Kerja" dari PDF asli TIDAK dipakai sama
+   sekali (isinya kadang berupa jam mentah yang tidak selalu mencerminkan
+   "terlambat" secara langsung, dan menambah kompleksitas parsing tanpa
+   manfaat berarti). Sebagai gantinya, keterlambatan dihitung SENDIRI oleh
+   sistem: membandingkan Jam Masuk aktual terhadap Jadwal Masuk (kolom
+   "JAM KERJA - MASUK"). Kalau Jam Masuk lebih siang dari Jadwal Masuk,
+   dihitung terlambat sebesar selisihnya; kalau tidak, dianggap tidak
+   terlambat.
+
+3) Tanggal disimpan dalam format ISO "YYYY-MM-DD" (bukan "DD/MM/YYYY").
+   Ini penting supaya pengurutan tanggal di database/tampilan benar walau
+   periode absensi melewati pergantian bulan (format DD/MM/YYYY kalau
+   diurutkan sebagai teks akan salah urut, mis. "01/07/2026" akan
+   terbaca "lebih kecil" dari "30/06/2026"). Tampilan ke pengguna tetap
+   diformat ulang jadi DD/MM/YYYY di frontend/Excel, hanya penyimpanan
+   internalnya yang ISO.
 
 Fungsi utama: ekstrak_pdf(path_pdf, nama_file)
 Mengembalikan: (rows, ringkasan, error)
@@ -19,30 +45,15 @@ Mengembalikan: (rows, ringkasan, error)
 """
 
 import re
+import hashlib
 import pdfplumber
 from datetime import datetime
 
 TANGGAL_REGEX = re.compile(r"^\d{1,2}-[A-Za-z]{3}-\d{4}$")
+NIP_REGEX = re.compile(r"^\d{18}$")
 RINGKASAN_REGEX = re.compile(r"([A-Z][A-Z /]*?)\s*:\s*(\d+)\s*Hari")
 
-# Indeks kolom tetap sesuai header tabel PDF asli (0-based)
-COL_NO = 0
-COL_NAMA = 1
-COL_NIP = 2
-COL_NRP = 3
-COL_GOL = 4
-COL_TANGGAL = 5
-COL_JADWAL_MASUK = 6
-COL_JADWAL_PULANG = 7
-COL_JAM_MASUK = 8
-COL_JAM_KELUAR = 9
-COL_DATANG_AWAL = 10
-COL_DATANG_TELAT = 11
-COL_PULANG_AWAL = 12
-COL_PULANG_TELAT = 13
-COL_JML_JAM = 14
-COL_KETERANGAN = 15
-JUMLAH_KOLOM_DIHARAPKAN = 16
+JUMLAH_KOLOM_MINIMAL = 16  # minimal: beberapa sel identitas + 10 kolom data
 
 
 def _bersih(v):
@@ -51,13 +62,46 @@ def _bersih(v):
     return str(v).replace("\n", " ").strip()
 
 
-def _format_tanggal(v):
-    """20-May-2026 -> 20/05/2026 (lebih mudah dipakai di Excel/filter)."""
+def _format_tanggal_iso(v):
+    """20-May-2026 -> 2026-05-20 (format ISO, supaya urutannya benar)."""
     v = _bersih(v)
     try:
-        return datetime.strptime(v, "%d-%b-%Y").strftime("%d/%m/%Y")
+        return datetime.strptime(v, "%d-%b-%Y").date().isoformat()
     except ValueError:
-        return v  # biarkan format asli jika gagal parse
+        return v  # biarkan apa adanya kalau gagal parse (jarang terjadi)
+
+
+def _cari_indeks_tanggal(bagian_depan):
+    for i, sel in enumerate(bagian_depan):
+        if TANGGAL_REGEX.match(_bersih(sel)):
+            return i
+    return -1
+
+
+def _cari_indeks_nip(bagian_depan):
+    """Cari NIP lewat pola angka 18 digit (format baku NIP PNS Indonesia) -
+    jauh lebih stabil daripada menebak posisi kolom."""
+    for i, sel in enumerate(bagian_depan):
+        if NIP_REGEX.match(_bersih(sel)):
+            return i
+    return -1
+
+
+def _hitung_telat(jadwal_masuk, jam_masuk):
+    """Bandingkan Jam Masuk aktual terhadap Jadwal Masuk. Kembalikan durasi
+    keterlambatan format 'HH:MM', atau '-' kalau tidak terlambat / data
+    tidak lengkap (mis. hari libur, cuti, tidak ada catatan jam masuk)."""
+    if jam_masuk in ("", "-") or jadwal_masuk in ("", "-", "00:00"):
+        return "-"
+    try:
+        t_jadwal = datetime.strptime(jadwal_masuk, "%H:%M")
+        t_masuk = datetime.strptime(jam_masuk, "%H:%M")
+    except ValueError:
+        return "-"
+    if t_masuk <= t_jadwal:
+        return "-"
+    selisih_menit = int((t_masuk - t_jadwal).total_seconds() // 60)
+    return f"{selisih_menit // 60:02d}:{selisih_menit % 60:02d}"
 
 
 def _adalah_header(row):
@@ -66,7 +110,6 @@ def _adalah_header(row):
 
 
 def _adalah_subheader_jam(row):
-    # baris kedua header: [None,...,'MASUK','PULANG',None...]
     joined = " ".join(_bersih(x) for x in row).upper()
     return joined.strip() in ("MASUK PULANG",)
 
@@ -81,27 +124,17 @@ def _adalah_baris_jabatan(row):
 
 def _adalah_baris_statistik(row):
     """Baris statistik/ringkasan: hanya kolom pertama berisi teks berpola
-    'LABEL : angka Hari' (bisa berisi beberapa pasangan sekaligus, dan bisa
-    muncul lebih dari satu baris per pegawai - misalnya baris utama berisi
-    Terlambat/Alpha/dst, lalu baris tambahan berisi rincian jenis Cuti)."""
+    'LABEL : angka Hari' (bisa beberapa pasangan sekaligus, dan bisa lebih
+    dari satu baris per pegawai - mis. baris rincian jenis Cuti terpisah)."""
     teks = _bersih(row[0])
     if not RINGKASAN_REGEX.search(teks):
         return False
-    if len(row) > COL_NAMA and _bersih(row[COL_NAMA]):
+    if len(row) > 1 and _bersih(row[1]):
         return False  # baris identitas pegawai baru, bukan baris statistik
     return True
 
 
 def _bangun_ringkasan(hasil, nama, nip, nrp, gol, sub_unit, jabatan, sumber_file):
-    """hasil: dict {LabelTitleCase: angka} hasil akumulasi seluruh baris
-    statistik milik satu pegawai (bisa dari beberapa baris terpisah)."""
-    FIELD_TETAP = {
-        "Terlambat", "Pulang Cepat", "Tidak Absen Datang", "Tidak Absen Pulang",
-        "Izin", "Alpha", "Sakit", "Dinas Luar", "Lepas Piket", "Tugas Belajar",
-        "Total Cuti", "Total Hari Kerja",
-    }
-
-    # rincian cuti: semua label berawalan "Cuti" selain "Total Cuti"
     rincian_cuti = [
         f"{label.upper()} : {jumlah} Hari"
         for label, jumlah in hasil.items()
@@ -109,7 +142,6 @@ def _bangun_ringkasan(hasil, nama, nip, nrp, gol, sub_unit, jabatan, sumber_file
     ]
     teks_cuti = ", ".join(rincian_cuti)
     if not teks_cuti and hasil.get("Total Cuti"):
-        # tidak ada rincian jenis, tapi total cuti > 0 -> tetap tampilkan totalnya
         teks_cuti = f"CUTI : {hasil.get('Total Cuti')} Hari"
 
     return {
@@ -117,6 +149,7 @@ def _bangun_ringkasan(hasil, nama, nip, nrp, gol, sub_unit, jabatan, sumber_file
         "NIP": nip or "-",
         "NRP": nrp or "-",
         "Golongan": gol or "-",
+        "Bidang": "",  # diisi belakangan: dari input manual saat proses, atau dikoreksi manual per pegawai
         "Terlambat (Hari)": hasil.get("Terlambat", ""),
         "Pulang Cepat (Hari)": hasil.get("Pulang Cepat", ""),
         "Tidak Absen Datang (Hari)": hasil.get("Tidak Absen Datang", ""),
@@ -131,10 +164,8 @@ def _bangun_ringkasan(hasil, nama, nip, nrp, gol, sub_unit, jabatan, sumber_file
         "Rincian Cuti": teks_cuti,
         "Total Hari Kerja": hasil.get("Total Hari Kerja", ""),
         "Sumber File": sumber_file,
-        # kolom tersembunyi (diawali "_"), dipakai untuk konteks tambahan bila diperlukan
         "_sub_unit": sub_unit or "",
         "_jabatan": jabatan or "",
-        # label lain di luar daftar tetap (mis. jenis cuti langka) tetap disimpan mentah
         "_hasil_mentah": dict(hasil),
     }
 
@@ -144,12 +175,9 @@ def ekstrak_pdf(path_pdf, nama_file):
     ringkasan_list = []
     ditemukan_tabel = False
 
-    # state yang di-"bawa turun" karena pada baris ke-2 dst NO/Nama/NIP/dst dikosongkan
     cur = {"no": "", "nama": "", "nip": "", "nrp": "", "gol": "", "subunit": "", "jabatan": "", "stat_acc": {}}
 
     def flush_ringkasan():
-        """Selesaikan akumulasi statistik pegawai saat ini (jika ada) dan
-        masukkan ke ringkasan_list, sebelum pindah ke pegawai berikutnya."""
         if cur["nama"] or cur["nip"]:
             ringkasan_list.append(_bangun_ringkasan(
                 cur["stat_acc"], cur["nama"], cur["nip"], cur["nrp"], cur["gol"],
@@ -166,7 +194,7 @@ def ekstrak_pdf(path_pdf, nama_file):
                 tables = page.extract_tables()
                 for table in tables:
                     for row in table:
-                        if len(row) < JUMLAH_KOLOM_DIHARAPKAN:
+                        if len(row) < JUMLAH_KOLOM_MINIMAL:
                             continue
                         if _adalah_header(row) or _adalah_subheader_jam(row):
                             ditemukan_tabel = True
@@ -183,24 +211,40 @@ def ekstrak_pdf(path_pdf, nama_file):
                             cur["stat_acc"].update(pasangan)
                             continue
 
-                        tanggal_raw = _bersih(row[COL_TANGGAL])
-                        if not TANGGAL_REGEX.match(tanggal_raw):
+                        # --- 10 kolom data TERAKHIR: selalu konsisten urutannya.
+                        # Hanya 4 yang dipakai (Jadwal Masuk/Pulang, Jam Masuk/
+                        # Keluar aktual) + Keterangan; sisanya (Datang Awal/
+                        # Telat, Pulang Awal/Telat, Jml Jam Kerja) sengaja
+                        # diabaikan sesuai arahan pembimbing.
+                        data = row[-10:]
+                        jadwal_masuk, jadwal_pulang, jam_masuk, jam_keluar = (_bersih(x) for x in data[0:4])
+                        keterangan = _bersih(data[9])
+
+                        # --- Tanggal: cari lewat pola tanggal di bagian depan ---
+                        bagian_depan = row[:-10]
+                        idx_tanggal = _cari_indeks_tanggal(bagian_depan)
+                        if idx_tanggal == -1:
                             continue  # baris tidak dikenali, lewati dengan aman
+                        tanggal_iso = _format_tanggal_iso(bagian_depan[idx_tanggal])
 
-                        # update state kalau kolom identitas terisi (baris pertama pegawai baru)
-                        if _bersih(row[COL_NAMA]):
-                            nama_baru = _bersih(row[COL_NAMA])
-                            if cur["nama"] and cur["nama"] != nama_baru:
-                                flush_ringkasan()  # tutup dulu rekap pegawai sebelumnya
-                            cur["no"] = _bersih(row[COL_NO])
-                            cur["nama"] = nama_baru
-                            cur["nip"] = _bersih(row[COL_NIP])
-                            cur["nrp"] = _bersih(row[COL_NRP])
-                            cur["gol"] = _bersih(row[COL_GOL])
+                        # --- Identitas pegawai: cari lewat pola NIP (18 digit),
+                        # BUKAN posisi tetap - posisi kolom di depan Tanggal
+                        # terbukti bisa berubah-ubah antar file/baris. ---
+                        idx_nip = _cari_indeks_nip(bagian_depan)
+                        if idx_nip != -1:
+                            nama_baru = _bersih(bagian_depan[idx_nip - 1]) if idx_nip >= 1 else ""
+                            if nama_baru:
+                                if cur["nama"] and cur["nama"] != nama_baru:
+                                    flush_ringkasan()
+                                cur["no"] = _bersih(bagian_depan[idx_nip - 2]) if idx_nip >= 2 else ""
+                                cur["nama"] = nama_baru
+                                cur["nip"] = _bersih(bagian_depan[idx_nip])
+                                cur["nrp"] = _bersih(bagian_depan[idx_nip + 1]) if idx_nip + 1 < len(bagian_depan) else ""
+                                cur["gol"] = _bersih(bagian_depan[idx_nip + 2]) if idx_nip + 2 < len(bagian_depan) else ""
 
-                        keterangan = _bersih(row[COL_KETERANGAN])
-                        jadwal_masuk = _bersih(row[COL_JADWAL_MASUK])
-                        jadwal_pulang = _bersih(row[COL_JADWAL_PULANG])
+                        if not cur["nama"] and not cur["nip"]:
+                            continue  # baris tanggal tanpa identitas pegawai yang jelas -> lewati
+
                         if not keterangan and jadwal_masuk == "00:00" and jadwal_pulang == "00:00":
                             keterangan = "Libur"
 
@@ -211,21 +255,18 @@ def ekstrak_pdf(path_pdf, nama_file):
                             "Golongan": cur["gol"] or "-",
                             "Sub Unit Kerja": cur["subunit"].replace("SUB UNIT KERJA", "").strip(" :"),
                             "Jabatan": cur["jabatan"].replace("JABATAN", "").strip(" :"),
-                            "Tanggal": _format_tanggal(tanggal_raw),
+                            "Bidang": "",  # diisi belakangan: dari input manual saat proses, atau dikoreksi manual per pegawai
+                            "Tanggal": tanggal_iso,
                             "Jadwal Masuk": jadwal_masuk,
                             "Jadwal Pulang": jadwal_pulang,
-                            "Jam Masuk": _bersih(row[COL_JAM_MASUK]),
-                            "Jam Keluar": _bersih(row[COL_JAM_KELUAR]),
-                            "Datang Awal": _bersih(row[COL_DATANG_AWAL]),
-                            "Datang Telat": _bersih(row[COL_DATANG_TELAT]),
-                            "Pulang Awal": _bersih(row[COL_PULANG_AWAL]),
-                            "Pulang Telat": _bersih(row[COL_PULANG_TELAT]),
-                            "Jumlah Jam Kerja": _bersih(row[COL_JML_JAM]),
+                            "Jam Masuk": jam_masuk,
+                            "Jam Keluar": jam_keluar,
+                            "Telat": _hitung_telat(jadwal_masuk, jam_masuk),
                             "Keterangan": keterangan,
                             "Sumber File": nama_file,
                         })
 
-            flush_ringkasan()  # selesaikan rekap pegawai terakhir di file ini
+            flush_ringkasan()
 
             if not ditemukan_tabel:
                 return [], [], "Struktur tabel tidak dikenali (header 'NO./NAMA PEGAWAI' tidak ditemukan) - kemungkinan format PDF berbeda"
@@ -237,3 +278,24 @@ def ekstrak_pdf(path_pdf, nama_file):
 
     except Exception as e:
         return [], [], f"Gagal membuka/membaca PDF: {e}"
+
+
+# ---------------------------------------------------------------------------
+# DETEKSI DUPLIKAT LAPIS 2 (dibangun ulang 23 Jul 2026): "sidik jari" data
+# harian satu pegawai, dipakai bersama db.py::cek_dan_catat_signature_pegawai
+# untuk mendeteksi kasus file diekspor ulang dari sistem sumber - isi data
+# sama persis tapi byte file berbeda, sehingga tidak tertangkap oleh
+# perbandingan hash file utuh (lapis 1, dihitung di app.py).
+# ---------------------------------------------------------------------------
+def hitung_signature_pegawai(baris_pegawai):
+    """baris_pegawai: list dict baris harian (elemen dari `rows` hasil
+    ekstrak_pdf) MILIK SATU NIP yang sama, dari SATU file yang sama.
+    Menghasilkan hash SHA-256 dari gabungan Tanggal+Jam Masuk+Jam Keluar+
+    Keterangan seluruh barisnya (diurutkan dulu berdasarkan Tanggal supaya
+    urutan ekstraksi tidak mempengaruhi hasil hash)."""
+    baris_urut = sorted(baris_pegawai, key=lambda r: r.get("Tanggal", ""))
+    teks = "|".join(
+        f"{r.get('Tanggal','')}:{r.get('Jam Masuk','')}:{r.get('Jam Keluar','')}:{r.get('Keterangan','')}"
+        for r in baris_urut
+    )
+    return hashlib.sha256(teks.encode("utf-8")).hexdigest()

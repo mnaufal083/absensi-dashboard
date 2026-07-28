@@ -47,32 +47,36 @@ LEBAR_KOLOM = [5.67, 44.0, 7.89, 22.44, 10.55, 8.66, 22.0, 8.55, 7.55, 12.0]
 NAMA_SHEET = "Rekapitulasi Absensi"
 
 
-def _format_periode(tanggal_list):
-    """list string 'dd/mm/yyyy' -> teks 'DD BULAN YYYY' (awal & akhir)."""
-    if not tanggal_list:
-        return "-", "-"
-    tanggal_dt = []
-    for t in tanggal_list:
+def _format_periode(periode_awal_iso, periode_akhir_iso):
+    """Ubah tanggal ISO 'yyyy-mm-dd' (kolom periode_awal/periode_akhir di
+    tabel batches) jadi teks 'D BULAN YYYY'. Return "-" kalau kosong/tidak
+    valid.
+
+    CATATAN (23 Jul 2026): sebelumnya fungsi ini menerima daftar tanggal
+    mentah lalu mem-parsing dengan format "%d/%m/%Y" - itu format LAMA.
+    Sejak extractor.py menyimpan tanggal sebagai ISO "%Y-%m-%d", parsing
+    format lama itu selalu gagal (silent) dan periode di Excel selalu
+    tampil "-" s.d. "-". Sekarang periode diambil langsung dari kolom
+    batches.periode_awal/periode_akhir yang sudah tersimpan (dihitung oleh
+    db.py::perbarui_periode_batch saat proses batch selesai), bukan
+    dihitung ulang dari ribuan baris attendance_records tiap kali unduh."""
+    def _fmt(iso):
+        if not iso:
+            return "-"
         try:
-            tanggal_dt.append(datetime.strptime(t, "%d/%m/%Y"))
+            d = datetime.strptime(str(iso)[:10], "%Y-%m-%d")
+            return f"{d.day} {BULAN_INDO[d.month]} {d.year}"
         except (ValueError, TypeError):
-            continue
-    if not tanggal_dt:
-        return "-", "-"
-    awal, akhir = min(tanggal_dt), max(tanggal_dt)
-
-    def fmt(d):
-        return f"{d.day} {BULAN_INDO[d.month]} {d.year}"
-
-    return fmt(awal), fmt(akhir)
+            return "-"
+    return _fmt(periode_awal_iso), _fmt(periode_akhir_iso)
 
 
-def tulis_sheet_rekap_resmi(workbook, ringkasan_list, semua_tanggal, nama_bidang=""):
+def tulis_sheet_rekap_resmi(workbook, ringkasan_list, periode_awal=None, periode_akhir=None, nama_bidang=""):
     """
     workbook       : objek openpyxl Workbook (dari pd.ExcelWriter(...).book)
     ringkasan_list : list dict hasil ekstraksi (lihat extractor.py -> _bangun_ringkasan)
-    semua_tanggal  : list string tanggal 'dd/mm/yyyy' dari seluruh baris harian
-                     (dipakai untuk menentukan periode awal/akhir otomatis)
+    periode_awal   : tanggal ISO 'yyyy-mm-dd' (kolom batches.periode_awal) atau None
+    periode_akhir  : tanggal ISO 'yyyy-mm-dd' (kolom batches.periode_akhir) atau None
     nama_bidang    : opsional. Jika diisi (mis. "PIDMIL"), SEMUA baris pegawai
                      di batch ini akan diberi nilai Bidang tersebut, dan nama
                      sheet memakai nama Bidang itu (mis. sheet "Pidmil").
@@ -85,7 +89,7 @@ def tulis_sheet_rekap_resmi(workbook, ringkasan_list, semua_tanggal, nama_bidang
 
     nama_bidang = (nama_bidang or "").strip()
 
-    periode_awal, periode_akhir = _format_periode(semua_tanggal)
+    periode_awal_fmt, periode_akhir_fmt = _format_periode(periode_awal, periode_akhir)
     jumlah_hari_kerja_list = [r.get("Total Hari Kerja") for r in ringkasan_list if isinstance(r.get("Total Hari Kerja"), int)]
     jumlah_hari_kerja = max(jumlah_hari_kerja_list) if jumlah_hari_kerja_list else "-"
 
@@ -106,7 +110,7 @@ def tulis_sheet_rekap_resmi(workbook, ringkasan_list, semua_tanggal, nama_bidang
 
     # baris 2: periode
     ws.merge_cells("A2:J2")
-    c = ws.cell(row=2, column=1, value=f"PERIODE : {periode_awal} s.d. {periode_akhir}")
+    c = ws.cell(row=2, column=1, value=f"PERIODE : {periode_awal_fmt} s.d. {periode_akhir_fmt}")
     c.font = FONT_PERIODE
     c.alignment = ALIGN_CENTER_NOWRAP
     ws.row_dimensions[2].height = 14.4

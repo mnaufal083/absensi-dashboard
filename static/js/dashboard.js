@@ -3,6 +3,19 @@
 // =====================================================================
 const content = document.getElementById("content");
 
+// Ikon SVG monoline (bukan emoji) yang dipakai berulang di berbagai halaman.
+const ICONS = {
+  chart: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><rect x="4" y="10" width="3" height="7" rx="0.8" fill="currentColor"/><rect x="8.5" y="5.5" width="3" height="11.5" rx="0.8" fill="currentColor"/><rect x="13" y="8" width="3" height="9" rx="0.8" fill="currentColor"/></svg>`,
+  filter: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M3 4h14l-5.5 6.5V16l-3 1.5v-7L3 4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
+  users: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><circle cx="7.5" cy="7" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M2.8 16c0-2.6 2.1-4.2 4.7-4.2s4.7 1.6 4.7 4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="14.5" cy="7.3" r="2" stroke="currentColor" stroke-width="1.4" opacity=".55"/><path d="M13 11.6c1.9.3 3.3 1.6 3.4 3.7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/></svg>`,
+  clock: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.7"/><path d="M10 6.5V10l2.6 1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  pie: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.7"/><path d="M10 3v7l5.2 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  building: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><rect x="4" y="3" width="9" height="14" rx="1" stroke="currentColor" stroke-width="1.6"/><rect x="6.3" y="5.8" width="1.6" height="1.6" fill="currentColor"/><rect x="10.1" y="5.8" width="1.6" height="1.6" fill="currentColor"/><rect x="6.3" y="9.2" width="1.6" height="1.6" fill="currentColor"/><rect x="10.1" y="9.2" width="1.6" height="1.6" fill="currentColor"/><rect x="7.7" y="12.6" width="2.6" height="4.4" fill="currentColor"/></svg>`,
+  alertTri: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M10 3.5l7.5 13H2.5l7.5-13z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="10" y1="8.5" x2="10" y2="11.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14" r="0.9" fill="currentColor"/></svg>`,
+  x: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+  check: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+};
+
 // Setiap kali isi #content diganti (apa pun fungsi render-nya), otomatis
 // diberi animasi masuk yang halus — jadi transisi antar menu terasa hidup.
 const observerTransisi = new MutationObserver(() => {
@@ -26,8 +39,10 @@ function sembunyikanTooltip() {
   tooltipChart.classList.remove("tampil");
 }
 let daftarKeteranganCache = null;
+let daftarBidangCache = null;
 let pendingChanges = {}; // key: `${record_table}:${record_id}:${field}` -> {record_table, record_id, field, nilai_baru}
 let currentBatchId = null;
+const currentUserId = document.body.dataset.userId || null;
 
 // ---------------------------------------------------------------------
 // ROUTING SIDEBAR
@@ -49,6 +64,7 @@ function gotoTab(name) {
     cari: renderCariPegawai,
     visual: renderVisualisasi,
     log: renderLogAktivitas,
+    akun: renderAkunList,
     pengaturan: renderPengaturan,
   };
   content.innerHTML = '<p class="loading-text">Memuat...</p>';
@@ -72,6 +88,13 @@ async function ambilDaftarKeterangan() {
     daftarKeteranganCache = await api("/api/keterangan");
   }
   return daftarKeteranganCache;
+}
+
+async function ambilDaftarBidang() {
+  if (!daftarBidangCache) {
+    daftarBidangCache = await api("/api/bidang");
+  }
+  return daftarBidangCache;
 }
 
 function optionsKeterangan(list, terpilih) {
@@ -124,11 +147,27 @@ async function renderBeranda() {
       ${aktivitas}
     </div>
 
+    <div class="grid-2">
+      <div class="kartu">
+        <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Ketidakhadiran Tanpa Keterangan (Alpha)</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Dijumlah dari seluruh batch yang tercatat</p>
+        <div class="scroll-list" id="rekapAlphaBeranda"></div>
+      </div>
+      <div class="kartu">
+        <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Keterlambatan Masuk Kerja</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Dijumlah dari seluruh batch yang tercatat</p>
+        <div class="scroll-list" id="rekapTerlambatBeranda"></div>
+      </div>
+    </div>
+
     <div style="display:flex;gap:10px;margin-top:6px">
       <button class="btn-primer" onclick="gotoTab('proses')">Proses batch baru ↗</button>
       <button class="btn-sekunder" onclick="gotoTab('riwayat')">Lihat riwayat batch</button>
     </div>
   `;
+
+  renderTabelRekap("rekapAlphaBeranda", data.ranking_alpha || []);
+  renderTabelRekap("rekapTerlambatBeranda", data.ranking_terlambat || []);
 }
 
 function formatWaktu(iso) {
@@ -137,10 +176,19 @@ function formatWaktu(iso) {
   return d.toLocaleString("id-ID", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function formatTanggalTampil(iso) {
+  // Tersimpan di database sebagai ISO "yyyy-mm-dd" (supaya urut benar),
+  // ditampilkan ke pengguna sebagai "dd/mm/yyyy" (format Indonesia).
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso || "-";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
 // ---------------------------------------------------------------------
 // PROSES BATCH BARU
 // ---------------------------------------------------------------------
-function renderProses() {
+async function renderProses() {
+  const daftarBidang = await ambilDaftarBidang();
   content.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
       <span class="icon-langkah">01</span>
@@ -154,8 +202,11 @@ function renderProses() {
       <button type="button" class="btn-sekunder" onclick="document.getElementById('inputFolder').click()">Pilih Folder</button>
     </div>
     <div id="daftarFileTerpilih" style="margin-bottom:16px"></div>
-    <label style="font-size:12.5px;color:var(--teks-sekunder);display:block;margin-bottom:5px;font-weight:600">Nama Bidang untuk batch ini</label>
-    <input type="text" id="inputBidang" placeholder="mis. Pidmil (kosongkan untuk deteksi campuran)" style="width:100%;margin-bottom:16px" />
+    <label style="font-size:12.5px;color:var(--teks-sekunder);display:block;margin-bottom:5px;font-weight:600">Bidang untuk batch ini</label>
+    <select id="inputBidang" style="width:100%;margin-bottom:16px">
+      <option value="">— Campuran / belum ditentukan —</option>
+      ${daftarBidang.map((b) => `<option value="${b.label}">${b.label}</option>`).join("")}
+    </select>
     <button class="btn-primer" id="btnProses" style="width:100%">Proses Semua File</button>
 
     <div id="progresProses" style="display:none;margin-top:16px">
@@ -292,6 +343,7 @@ function renderProses() {
         const fileForm = new FormData();
         fileForm.append("batch_id", batchId);
         fileForm.append("file", file);
+        fileForm.append("nama_bidang", document.getElementById("inputBidang").value.trim());
         const fileRes = await fetch("/api/proses/file", { method: "POST", body: fileForm });
         const fileData = await ambilJsonAtauLempar(fileRes);
 
@@ -338,7 +390,7 @@ function tampilkanHasilProses(data) {
     (data.pratinjau || [])
       .map(
         (r) => `<div class="tabel-baris" style="grid-template-columns:1.3fr 1fr 0.8fr 1fr 1fr">
-          <span>${r.nama}</span><span>${r.nip}</span><span>${r.tanggal}</span>
+          <span>${r.nama}</span><span>${r.nip}</span><span>${formatTanggalTampil(r.tanggal)}</span>
           <span>${r.jam_masuk || "-"}</span><span>${r.keterangan || "-"}</span>
         </div>`
       )
@@ -393,17 +445,18 @@ async function renderRiwayatList() {
       return `
       <p style="font-size:11.5px;font-weight:700;letter-spacing:.3px;color:var(--teks-muted);margin:16px 0 6px;text-transform:uppercase">${grup.label}</p>
       <div class="tabel-wrap" style="margin-bottom:4px">
-        <div class="tabel-header-baris" style="grid-template-columns:1.6fr 1fr 1.3fr 1fr 0.6fr">
-          <span>BATCH</span><span>BIDANG</span><span>PERIODE ABSENSI</span><span>STATUS</span><span></span>
+        <div class="tabel-header-baris" style="grid-template-columns:1.6fr 1fr 1.3fr 1fr 0.5fr 0.4fr">
+          <span>BATCH</span><span>BIDANG</span><span>PERIODE ABSENSI</span><span>STATUS</span><span></span><span></span>
         </div>
         ${grup.batches
           .map(
-            (b) => `<div class="tabel-baris" style="grid-template-columns:1.6fr 1fr 1.3fr 1fr 0.6fr" onclick="bukaDetailBatch('${b.id}')">
+            (b) => `<div class="tabel-baris" style="grid-template-columns:1.6fr 1fr 1.3fr 1fr 0.5fr 0.4fr" onclick="bukaDetailBatch('${b.id}')">
             <span>${b.label} · ${b.jumlah_pegawai} pegawai</span>
             <span>${b.nama_bidang || "-"}</span>
             <span style="color:var(--teks-sekunder)">${formatPeriode(b.periode_awal, b.periode_akhir)}</span>
             <span class="badge ${b.status === "final" ? "badge-final" : "badge-draf"}">${b.status === "final" ? "Final" : "Draf"}</span>
             <span style="color:var(--kuning-status-teks);font-weight:600">Buka →</span>
+            <button type="button" class="btn-hapus-baris" title="Hapus batch ini" onclick="event.stopPropagation(); hapusBatch('${b.id}')">${ICONS.x}</button>
           </div>`
           )
           .join("")}
@@ -430,26 +483,34 @@ async function bukaDetailBatch(batchId) {
   currentBatchId = batchId;
   pendingChanges = {};
   content.innerHTML = '<p class="loading-text">Memuat batch...</p>';
-  const [detail, keterangan] = await Promise.all([
+  const [detail, keterangan, bidang] = await Promise.all([
     api(`/api/batches/${batchId}`),
     ambilDaftarKeterangan(),
+    ambilDaftarBidang(),
   ]);
-  renderDetailBatch(detail, keterangan);
+  renderDetailBatch(detail, keterangan, bidang);
 }
 
-function renderDetailBatch(detail, keterangan) {
+function renderDetailBatch(detail, keterangan, daftarBidang) {
   const b = detail.batch;
+  const isFinal = b.status === "final";
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
       <div>
         <p style="font-size:16px;font-weight:700;margin:0" class="judul-serif">${b.label}</p>
         <p style="font-size:12px;color:var(--teks-sekunder);margin:3px 0 0">${b.jumlah_pegawai} pegawai · ${b.nama_bidang || "campuran"} · periode ${formatPeriode(b.periode_awal, b.periode_akhir)} · ${detail.berkas_bermasalah.length} berkas bermasalah</p>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-sekunder" onclick="gotoTab('riwayat')">← Semua batch</button>
+        <button class="btn-sekunder" onclick="ubahStatusBatch('${b.id}', '${isFinal ? "draft" : "final"}')">
+          ${isFinal ? "Tandai Draf lagi" : "Tandai Final (siap unduh)"}
+        </button>
+        <button class="btn-primer" onclick="unduhBatch('${b.id}', '${b.status}')">⬇ Unduh Excel</button>
         <button class="btn-sekunder" onclick="hapusBatch('${b.id}')" style="color:var(--merah-teks);border-color:#E8B8A8">Hapus batch</button>
       </div>
     </div>
+
+    ${isFinal ? `<div class="banner-warning" style="margin-bottom:12px">${ICONS.alertTri} Batch ini sudah <b>Final</b> - data tidak bisa diedit. Klik "Tandai Draf lagi" di atas dulu kalau perlu dikoreksi.</div>` : ""}
 
     <div class="subtab-row" style="justify-content:space-between;align-items:center">
       <div style="display:flex">
@@ -464,22 +525,15 @@ function renderDetailBatch(detail, keterangan) {
       <span><span id="jumlahBerubah">0</span> perubahan belum disimpan</span>
       <button class="btn-primer" onclick="simpanPerubahan()">Simpan perubahan</button>
     </div>
-    <div id="savedBar" class="banner-success" style="display:none">✓ Perubahan tersimpan</div>
+    <div id="savedBar" class="banner-success" style="display:none">${ICONS.check} Perubahan tersimpan</div>
 
     <div id="sub-harian"></div>
     <div id="sub-ringkasan" style="display:none"></div>
     <div id="sub-log" style="display:none"></div>
-
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px">
-      <button class="btn-sekunder" onclick="ubahStatusBatch('${b.id}', '${b.status === "final" ? "draft" : "final"}')">
-        ${b.status === "final" ? "Tandai Draf lagi" : "Tandai Final (siap unduh)"}
-      </button>
-      <button class="btn-primer" onclick="unduhBatch('${b.id}')">⬇ Unduh Excel</button>
-    </div>
   `;
 
-  renderTabelHarian(detail.attendance, keterangan);
-  renderTabelRingkasan(detail.ringkasan);
+  renderTabelHarian(detail.attendance, keterangan, isFinal);
+  renderTabelRingkasan(detail.ringkasan, isFinal, daftarBidang);
   renderLogBerkasBatch(detail.berkas_bermasalah);
 
   document.querySelectorAll(".subtab").forEach((btn) => {
@@ -500,7 +554,7 @@ function renderDetailBatch(detail, keterangan) {
   });
 }
 
-function renderTabelHarian(rows, keterangan) {
+function renderTabelHarian(rows, keterangan, isFinal) {
   const wrap = document.getElementById("sub-harian");
   if (!rows.length) {
     wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Tidak ada data harian.</p>`;
@@ -515,37 +569,30 @@ function renderTabelHarian(rows, keterangan) {
     if (!grup.has(kunci)) grup.set(kunci, { nama: r.nama, nip: r.nip, baris: [] });
     grup.get(kunci).baris.push(r);
   });
+  const daftarGrup = Array.from(grup.values());
 
-  const html = Array.from(grup.values())
+  // PERBAIKAN PERFORMA (25 Jul 2026): sebelumnya SELURUH baris harian semua
+  // pegawai dibangun jadi elemen DOM sekaligus di awal (cuma disembunyikan
+  // lewat CSS) - untuk batch besar ini bisa ribuan input/dropdown dibuat
+  // padahal belum tentu dilihat user. Sekarang isi tiap pegawai baru
+  // dibangun saat accordion-nya PERTAMA KALI diklik (lazy render), lalu
+  // di-cache (tidak dibangun ulang kalau ditutup-buka lagi) - jauh lebih
+  // ringan terutama untuk batch ratusan pegawai.
+  const html = daftarGrup
     .map((g, gi) => {
       const jumlahEdit = g.baris.filter((r) => r.is_edited).length;
       const kataKunci = `${g.nama} ${g.nip}`.toLowerCase();
       return `
-      <div data-grup-pegawai="${kataKunci}" style="border:0.5px solid var(--kartu-tepi);border-radius:10px;margin-bottom:8px;overflow:hidden;background:#fff">
+      <div data-grup-pegawai="${kataKunci}" style="border:0.5px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;background:var(--kartu-bg)">
         <button type="button" class="grup-toggle" data-grup-index="${gi}"
-          style="width:100%;display:flex;justify-content:space-between;align-items:center;background:#fff;border:none;padding:12px 16px;text-align:left;cursor:pointer">
+          style="width:100%;display:flex;justify-content:space-between;align-items:center;background:var(--kartu-bg);border:none;padding:12px 16px;text-align:left;cursor:pointer">
           <span style="font-size:13px;font-weight:600;color:var(--teks-utama)">
             <span class="grup-panah" style="display:inline-block;transition:transform .15s;margin-right:8px">▸</span>
             ${g.nama} <span style="font-weight:400;color:var(--teks-sekunder)">· NIP ${g.nip || "-"}</span>
           </span>
           <span style="font-size:12px;color:var(--teks-muted)">${g.baris.length} hari${jumlahEdit ? ` · ${jumlahEdit} diedit` : ""}</span>
         </button>
-        <div class="grup-isi" id="grup-isi-${gi}" style="display:none;border-top:0.5px solid var(--kartu-tepi)">
-          <div class="tabel-header-baris" style="grid-template-columns:0.8fr 1fr 1fr 1.3fr 1fr">
-            <span>TANGGAL</span><span>JAM MASUK</span><span>JAM KELUAR</span><span>KETERANGAN</span><span>TELAT</span>
-          </div>
-          ${g.baris
-            .map(
-              (r) => `<div class="tabel-baris ${r.is_edited ? "diedit" : ""}" style="grid-template-columns:0.8fr 1fr 1fr 1.3fr 1fr" data-record-id="${r.id}">
-              <span style="color:var(--teks-sekunder)">${r.tanggal}</span>
-              <input class="edit-field" data-tabel="attendance_records" data-record="${r.id}" data-field="jam_masuk" value="${r.jam_masuk || ""}" />
-              <input class="edit-field" data-tabel="attendance_records" data-record="${r.id}" data-field="jam_keluar" value="${r.jam_keluar || ""}" />
-              <select class="edit-field" data-tabel="attendance_records" data-record="${r.id}" data-field="keterangan">${optionsKeterangan(keterangan, r.keterangan)}</select>
-              <input class="edit-field" data-tabel="attendance_records" data-record="${r.id}" data-field="datang_telat" value="${r.datang_telat || ""}" placeholder="-" />
-            </div>`
-            )
-            .join("")}
-        </div>
+        <div class="grup-isi" id="grup-isi-${gi}" style="border-top:0.5px solid var(--border)"></div>
       </div>`;
     })
     .join("");
@@ -557,43 +604,75 @@ function renderTabelHarian(rows, keterangan) {
 
   wrap.querySelectorAll(".grup-toggle").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const isi = document.getElementById(`grup-isi-${btn.dataset.grupIndex}`);
+      const gi = btn.dataset.grupIndex;
+      const isi = document.getElementById(`grup-isi-${gi}`);
       const panah = btn.querySelector(".grup-panah");
-      const terbuka = isi.style.display === "block";
-      isi.style.display = terbuka ? "none" : "block";
-      panah.style.transform = terbuka ? "rotate(0deg)" : "rotate(90deg)";
+      const terbuka = isi.classList.toggle("terbuka");
+      panah.style.transform = terbuka ? "rotate(90deg)" : "rotate(0deg)";
+
+      if (terbuka && !isi.dataset.dimuat) {
+        const g = daftarGrup[gi];
+        const dis = isFinal ? "disabled" : "";
+        isi.innerHTML = `
+          <div class="tabel-header-baris" style="grid-template-columns:0.8fr 1fr 1fr 1.3fr 1fr">
+            <span>TANGGAL</span><span>JAM MASUK</span><span>JAM KELUAR</span><span>KETERANGAN</span><span>TELAT</span>
+          </div>
+          ${g.baris
+            .map(
+              (r) => `<div class="tabel-baris ${r.is_edited ? "diedit" : ""}" style="grid-template-columns:0.8fr 1fr 1fr 1.3fr 1fr" data-record-id="${r.id}">
+              <span style="color:var(--teks-sekunder)">${formatTanggalTampil(r.tanggal)}</span>
+              <input class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="jam_masuk" value="${r.jam_masuk || ""}" />
+              <input class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="jam_keluar" value="${r.jam_keluar || ""}" />
+              <select class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="keterangan">${optionsKeterangan(keterangan, r.keterangan)}</select>
+              <input class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="datang_telat" value="${r.datang_telat || ""}" placeholder="-" />
+            </div>`
+            )
+            .join("")}
+        `;
+        if (!isFinal) pasangListenerEdit(isi);
+        isi.dataset.dimuat = "1"; // tanda sudah dibangun, tidak perlu diulang kalau ditutup-buka lagi
+      }
     });
   });
-
-  pasangListenerEdit(wrap);
 }
 
-function renderTabelRingkasan(rows) {
+function renderTabelRingkasan(rows, isFinal, daftarBidang) {
   const wrap = document.getElementById("sub-ringkasan");
   if (!rows.length) {
     wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Tidak ada ringkasan.</p>`;
     return;
   }
+  const opsiBidang = ["", ...daftarBidang.map((b) => b.label)]
+    .map((b) => `<option value="${b}">${b || "Belum diketahui"}</option>`)
+    .join("");
+  // Kolom angka (Terlambat/Sakit/Izin/Alpha) cuma butuh 1-2 digit, jadi
+  // diberi lebar TETAP yang kecil (bukan proporsional/fr) supaya tidak
+  // ikut melebar dan mendesak kolom Nama & Rincian Cuti yang justru butuh
+  // ruang lebih untuk teks panjang.
+  const GRID_RINGKASAN = "1.8fr 1fr 64px 64px 64px 64px 2fr";
+  const dis = isFinal ? "disabled" : "";
   wrap.innerHTML = `
-    <div class="tabel-wrap" style="min-width:680px;margin-bottom:6px">
-      <div class="tabel-header-baris" style="grid-template-columns:1.4fr 0.8fr 0.8fr 0.8fr 0.8fr 1.4fr">
-        <span>NAMA</span><span>TERLAMBAT</span><span>SAKIT</span><span>IZIN</span><span>ALPHA</span><span>RINCIAN CUTI</span>
+    <p style="font-size:11px;color:var(--teks-muted);margin:0 0 8px">Kolom <b>Bidang</b> perlu dikoreksi manual kalau batch ini gabungan lintas-Bidang (sistem tidak bisa menebaknya otomatis dari isi PDF).</p>
+    <div class="tabel-wrap" style="min-width:900px;margin-bottom:6px">
+      <div class="tabel-header-baris" style="grid-template-columns:${GRID_RINGKASAN}">
+        <span>NAMA</span><span>BIDANG</span><span>TELAT</span><span>SAKIT</span><span>IZIN</span><span>ALPHA</span><span>RINCIAN CUTI</span>
       </div>
       ${rows
         .map(
-          (r) => `<div class="tabel-baris ${r.is_edited ? "diedit" : ""}" style="grid-template-columns:1.4fr 0.8fr 0.8fr 0.8fr 0.8fr 1.4fr" data-record-id="${r.id}" data-grup-pegawai="${(r.nama + " " + (r.nip || "")).toLowerCase()}">
+          (r) => `<div class="tabel-baris ${r.is_edited ? "diedit" : ""}" style="grid-template-columns:${GRID_RINGKASAN}" data-record-id="${r.id}" data-grup-pegawai="${(r.nama + " " + (r.nip || "")).toLowerCase()}">
           <span>${r.nama}</span>
-          <input class="edit-field" type="number" min="0" data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="terlambat" value="${r.terlambat || 0}" />
-          <input class="edit-field" type="number" min="0" data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="sakit" value="${r.sakit || 0}" />
-          <input class="edit-field" type="number" min="0" data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="izin" value="${r.izin || 0}" />
-          <input class="edit-field" type="number" min="0" data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="alpha" value="${r.alpha || 0}" />
-          <input class="edit-field" data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="rincian_cuti" value="${r.rincian_cuti || ""}" />
+          <select class="edit-field" ${dis} data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="bidang">${opsiBidang.replace(`value="${r.bidang || ""}"`, `value="${r.bidang || ""}" selected`)}</select>
+          <input class="edit-field" ${dis} type="number" min="0" data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="terlambat" value="${r.terlambat || 0}" />
+          <input class="edit-field" ${dis} type="number" min="0" data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="sakit" value="${r.sakit || 0}" />
+          <input class="edit-field" ${dis} type="number" min="0" data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="izin" value="${r.izin || 0}" />
+          <input class="edit-field" ${dis} type="number" min="0" data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="alpha" value="${r.alpha || 0}" />
+          <input class="edit-field" ${dis} data-tabel="ringkasan_pegawai" data-record="${r.id}" data-field="rincian_cuti" value="${r.rincian_cuti || ""}" />
         </div>`
         )
         .join("")}
     </div>
   `;
-  pasangListenerEdit(wrap);
+  if (!isFinal) pasangListenerEdit(wrap);
 }
 
 function renderLogBerkasBatch(list) {
@@ -618,7 +697,13 @@ function pasangListenerEdit(container) {
         field: el.dataset.field,
         nilai_baru: el.value,
       };
-      el.closest("[data-record-id]").classList.add("diedit");
+      const baris = el.closest("[data-record-id]");
+      baris.classList.add("diedit");
+      // kedipan singkat supaya perubahan terasa langsung direspons, bukan
+      // cuma diam-diam tercatat di belakang layar
+      baris.classList.remove("baru-diedit");
+      void baris.offsetWidth; // paksa reflow supaya animasinya bisa diulang tiap kali
+      baris.classList.add("baru-diedit");
       document.getElementById("savedBar").style.display = "none";
       const bar = document.getElementById("unsavedBar");
       bar.style.display = "flex";
@@ -644,15 +729,20 @@ async function simpanPerubahan() {
 }
 
 async function ubahStatusBatch(batchId, statusBaru) {
-  if (statusBaru === "final") {
-    await api(`/api/batches/${batchId}/final`, { method: "POST" });
-  }
-  // Catatan: endpoint untuk kembali ke draf belum ada di app.py contoh ini;
-  // tambahkan route serupa /api/batches/<id>/draf jika dibutuhkan.
+  const endpoint = statusBaru === "final" ? "final" : "draf";
+  await api(`/api/batches/${batchId}/${endpoint}`, { method: "POST" });
   bukaDetailBatch(batchId);
 }
 
-function unduhBatch(batchId) {
+async function unduhBatch(batchId, statusSaatIni) {
+  if (statusSaatIni !== "final") {
+    const lanjut = confirm(
+      'Batch ini masih berstatus Draf. Excel cuma bisa diunduh dari batch yang sudah Final (supaya rekap yang terunduh selalu data yang sudah "dikunci").\n\nTandai Final sekarang dan lanjut unduh?'
+    );
+    if (!lanjut) return;
+    await api(`/api/batches/${batchId}/final`, { method: "POST" });
+    if (currentBatchId === batchId) bukaDetailBatch(batchId); // refresh tampilan status & kunci field edit
+  }
   window.location.href = `/api/batches/${batchId}/unduh`;
 }
 
@@ -670,49 +760,215 @@ function renderCariPegawai() {
     <p style="font-size:16px;font-weight:700;margin:0 0 14px" class="judul-serif">Cari Pegawai</p>
     <input type="text" id="inputCari" placeholder="Cari nama atau NIP (minimal 2 huruf)..." style="width:100%;margin-bottom:16px" />
     <div id="hasilCari"></div>
-    <div id="riwayatPegawai" style="margin-top:16px"></div>
   `;
   let timer;
   document.getElementById("inputCari").addEventListener("input", (e) => {
     clearTimeout(timer);
     const q = e.target.value.trim();
     timer = setTimeout(async () => {
+      const wrap = document.getElementById("hasilCari");
       if (q.length < 2) {
-        document.getElementById("hasilCari").innerHTML = "";
+        wrap.innerHTML = "";
         return;
       }
       const hasil = await api(`/api/cari-pegawai?q=${encodeURIComponent(q)}`);
-      document.getElementById("hasilCari").innerHTML = hasil.length
+      // Setiap hasil dibungkus jadi accordion sendiri (header + slot riwayat
+      // tepat di bawahnya) - pola sama seperti akordeon pegawai di Data
+      // Harian, supaya konsisten dan riwayatnya muncul PAS di bawah kartu
+      // yang diklik, bukan menumpuk di bawah seluruh daftar.
+      wrap.innerHTML = hasil.length
         ? hasil
             .map(
-              (h) => `<div class="kartu" style="cursor:pointer;margin-bottom:8px" onclick="lihatRiwayatPegawai('${h.nip}')">
-              <b>${h.nama}</b><br/><span style="font-size:12px;color:var(--teks-sekunder)">NIP ${h.nip} · ${h.sub_unit_kerja || "-"}</span>
-            </div>`
+              (h) => `
+          <div class="grup-cari" style="border:0.5px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;background:var(--kartu-bg)">
+            <button type="button" class="kartu-cari" data-nip="${h.nip}"
+              style="width:100%;text-align:left;background:var(--kartu-bg);border:none;padding:14px 16px;cursor:pointer">
+              <b style="font-size:13.5px;color:var(--teks-utama)">${h.nama}</b><br/>
+              <span style="font-size:12px;color:var(--teks-sekunder)">NIP ${h.nip} · ${h.sub_unit_kerja || "-"}</span>
+            </button>
+            <div class="grup-isi" id="riwayat-${h.nip}" style="border-top:0.5px solid var(--border)"></div>
+          </div>`
             )
             .join("")
         : `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Tidak ditemukan.</p>`;
+
+      wrap.querySelectorAll(".kartu-cari").forEach((kartu) => {
+        kartu.addEventListener("click", () => togglePegawai(kartu));
+      });
     }, 350);
   });
 }
 
-async function lihatRiwayatPegawai(nip) {
-  const riwayat = await api(`/api/riwayat-pegawai/${encodeURIComponent(nip)}`);
-  const wrap = document.getElementById("riwayatPegawai");
-  if (!riwayat.length) {
-    wrap.innerHTML = "";
+async function togglePegawai(kartu) {
+  const nip = kartu.dataset.nip;
+  const isi = document.getElementById(`riwayat-${nip}`);
+  const sedangTerbuka = isi.classList.contains("terbuka");
+
+  // Accordion: tutup dulu kartu lain yang sedang terbuka, biar cuma satu
+  // riwayat yang tampil sekaligus - lebih rapi & fokus.
+  document.querySelectorAll(".kartu-cari.aktif").forEach((k) => {
+    if (k !== kartu) {
+      k.classList.remove("aktif");
+      document.getElementById(`riwayat-${k.dataset.nip}`).classList.remove("terbuka");
+    }
+  });
+
+  if (sedangTerbuka) {
+    isi.classList.remove("terbuka");
+    kartu.classList.remove("aktif");
     return;
   }
-  wrap.innerHTML = `
-    <p style="font-size:13px;font-weight:700;margin:0 0 8px">Riwayat ${riwayat[0].nama} di ${riwayat.length} batch</p>
-    <div class="tabel-wrap">
-      <div class="tabel-header-baris" style="grid-template-columns:1.3fr 1fr 0.8fr 0.8fr 0.8fr">
-        <span>PERIODE</span><span>BIDANG</span><span>TERLAMBAT</span><span>SAKIT</span><span>ALPHA</span>
+
+  kartu.classList.add("aktif");
+  isi.classList.add("terbuka");
+
+  if (!isi.dataset.dimuat) {
+    isi.innerHTML = `<p style="font-size:12px;color:var(--teks-muted);padding:12px 16px">Memuat riwayat...</p>`;
+    const riwayat = await api(`/api/riwayat-pegawai/${encodeURIComponent(nip)}`);
+    isi.innerHTML = !riwayat.length
+      ? `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic;padding:12px 16px">Belum ada riwayat batch untuk pegawai ini.</p>`
+      : `
+        <div style="padding:12px 16px 14px">
+          <p style="font-size:12px;font-weight:700;margin:0 0 8px;color:var(--teks-sekunder);text-transform:uppercase;letter-spacing:.3px">Riwayat di ${riwayat.length} batch</p>
+          <div class="tabel-wrap">
+            <div class="tabel-header-baris" style="grid-template-columns:1.3fr 1fr 0.8fr 0.8fr 0.8fr">
+              <span>PERIODE</span><span>BIDANG</span><span>TERLAMBAT</span><span>SAKIT</span><span>ALPHA</span>
+            </div>
+            ${riwayat
+              .map(
+                (r) => `<div class="tabel-baris" style="grid-template-columns:1.3fr 1fr 0.8fr 0.8fr 0.8fr">
+              <span>${r.batches?.label || "-"}</span><span>${r.batches?.nama_bidang || "-"}</span>
+              <span>${r.terlambat}</span><span>${r.sakit}</span><span>${r.alpha}</span>
+            </div>`
+              )
+              .join("")}
+          </div>
+        </div>`;
+    isi.dataset.dimuat = "1"; // di-cache, tidak diambil ulang kalau ditutup-buka lagi
+  }
+}
+
+// ---------------------------------------------------------------------
+// VISUALISASI (ringkas, dihitung dari daftar batch yang sudah dimuat)
+// ---------------------------------------------------------------------
+const PALET_KETERANGAN = ["#2563EB", "#94A3B8", "#F59E0B", "#0D9488", "#8B5CF6", "#DC2626", "#38BDF8"];
+
+async function renderVisualisasi() {
+  const [batches, daftarBidang] = await Promise.all([api("/api/batches"), ambilDaftarBidang()]);
+
+  content.innerHTML = `
+    <p style="font-size:16px;font-weight:700;margin:0 0 14px" class="judul-serif">${ICONS.chart} Visualisasi</p>
+
+    <div class="kartu">
+      <p class="stat-label" style="font-weight:600;margin-bottom:10px">${ICONS.filter} Filter Data</p>
+      <div class="filter-bar">
+        <div>
+          <label>Pilih Batch</label>
+          <select id="filterBatch">
+            <option value="all">Seluruh Batch (akumulasi)</option>
+            ${batches.map((b) => `<option value="${b.id}">${b.label} · ${b.nama_bidang || "campuran"}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label>Pilih Bidang</label>
+          <select id="filterBidang">
+            <option value="all">Semua Bidang (gabungan)</option>
+            ${daftarBidang.map((b) => `<option value="${b.label}">${b.label}</option>`).join("")}
+          </select>
+        </div>
       </div>
-      ${riwayat
+      <div class="konteks-banner" id="konteksBanner"></div>
+    </div>
+
+    <div class="grid-4" style="margin-bottom:14px">
+      <div class="kartu"><p class="stat-label">${ICONS.users} Total Pegawai</p><p class="stat-angka" id="statTotal">-</p></div>
+      <div class="kartu"><p class="stat-label">${ICONS.clock} Telat (hari)</p><p class="stat-angka" style="color:#2563EB" id="statTelat">-</p></div>
+      <div class="kartu"><p class="stat-label">Sakit (hari)</p><p class="stat-angka" style="color:#D97706" id="statSakit">-</p></div>
+      <div class="kartu"><p class="stat-label">${ICONS.x} Alpha (hari)</p><p class="stat-angka" style="color:var(--merah-teks)" id="statAlpha">-</p></div>
+    </div>
+
+    <div class="kartu">
+      <p class="stat-label" style="font-weight:600;margin-bottom:12px">${ICONS.pie} Komposisi Keterangan <span id="labelDonut" style="font-weight:400;color:var(--teks-muted)"></span></p>
+      <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+        <div id="donutChart"></div>
+        <div id="donutLegend" style="flex:1;min-width:180px"></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="kartu">
+        <p class="stat-label" style="font-weight:600;margin-bottom:6px">${ICONS.chart} Tren — Seluruh Bidang</p>
+        <div style="display:flex;gap:10px;font-size:11px;color:var(--teks-sekunder);margin-bottom:4px">
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#DC2626;margin-right:3px"></span>Alpha</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#D97706;margin-right:3px"></span>Sakit</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2563EB;margin-right:3px"></span>Terlambat</span>
+        </div>
+        <div id="trenSeluruh"></div>
+        <p style="font-size:10.5px;color:var(--teks-muted);margin:6px 0 0">Selalu menjumlahkan kelima Bidang, tidak ikut filter — acuan pembanding.</p>
+      </div>
+
+      <div class="kartu">
+        <p class="stat-label" style="font-weight:600;margin-bottom:6px">${ICONS.chart} Tren — <span id="labelTrenBidang">Per Bidang</span></p>
+        <div style="display:flex;gap:10px;font-size:11px;color:var(--teks-sekunder);margin-bottom:4px">
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#DC2626;margin-right:3px"></span>Alpha</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#D97706;margin-right:3px"></span>Sakit</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2563EB;margin-right:3px"></span>Terlambat</span>
+        </div>
+        <div id="trenPerBidang"></div>
+        <p style="font-size:10.5px;color:var(--teks-muted);margin:6px 0 0">Mengikuti pilihan Bidang di atas (Batch tidak berpengaruh).</p>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="kartu">
+        <p class="stat-label" style="font-weight:600;margin-bottom:2px">${ICONS.building} Perbandingan Antar Bidang</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 12px">Dijumlah dari seluruh batch yang sudah diberi Bidang (baik saat upload maupun dikoreksi manual) — tidak mengikuti filter Bidang di atas, karena tujuannya membandingkan kelimanya sekaligus. Filter Batch tetap berlaku.</p>
+        <div id="perbandinganBidang"></div>
+      </div>
+
+      <div class="kartu">
+        <p class="stat-label" style="font-weight:600;margin-bottom:2px">${ICONS.clock} Rekapitulasi Keterlambatan Masuk Kerja <span id="labelBar" style="font-weight:400;color:var(--teks-muted)"></span></p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Mengikuti filter Batch &amp; Bidang di atas · arahkan kursor ke batang untuk lihat nama</p>
+        <div id="barKeterlambatan"></div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("filterBatch").addEventListener("change", muatDataVisualisasi);
+  document.getElementById("filterBidang").addEventListener("change", muatDataVisualisasi);
+
+  // Grafik "Seluruh Bidang" dimuat sekali saja — selalu menjumlahkan semua data, tidak ikut filter
+  const trenSeluruh = await api("/api/visualisasi?filter_mode=all");
+  renderTrenBulananGaris("trenSeluruh", trenSeluruh.tren_keseluruhan);
+
+  muatDataVisualisasi();
+}
+
+function renderPerbandinganBidang(data) {
+  const wrap = document.getElementById("perbandinganBidang");
+  const adaData = data.some((d) => d.total_pegawai > 0);
+  if (!adaData) {
+    wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Belum ada pegawai yang diberi Bidang. Isi "Nama Bidang" saat unggah, atau koreksi kolom Bidang di tab Ringkasan Pegawai.</p>`;
+    return;
+  }
+  const maxPegawai = Math.max(1, ...data.map((d) => d.total_pegawai));
+  wrap.innerHTML = `
+    <div class="tabel-wrap">
+      <div class="tabel-header-baris" style="grid-template-columns:1fr 1.6fr 0.8fr 0.8fr">
+        <span>BIDANG</span><span>TOTAL PEGAWAI</span><span>TELAT</span><span>ALPHA</span>
+      </div>
+      ${data
         .map(
-          (r) => `<div class="tabel-baris" style="grid-template-columns:1.3fr 1fr 0.8fr 0.8fr 0.8fr">
-          <span>${r.batches?.label || "-"}</span><span>${r.batches?.nama_bidang || "-"}</span>
-          <span>${r.terlambat}</span><span>${r.sakit}</span><span>${r.alpha}</span>
+          (d) => `<div class="tabel-baris" style="grid-template-columns:1fr 1.6fr 0.8fr 0.8fr">
+          <span style="font-weight:600">${d.bidang}</span>
+          <span style="display:flex;align-items:center;gap:8px">
+            <span style="flex:1;background:var(--abu-bg);border-radius:3px;height:9px">
+              <span style="display:block;width:${(d.total_pegawai / maxPegawai) * 100}%;height:100%;background:var(--biru);border-radius:3px"></span>
+            </span>
+            <span style="width:32px;text-align:right;font-size:12px">${d.total_pegawai}</span>
+          </span>
+          <span style="color:#2563EB">${d.telat}</span>
+          <span style="color:var(--merah-teks)">${d.alpha}</span>
         </div>`
         )
         .join("")}
@@ -720,58 +976,99 @@ async function lihatRiwayatPegawai(nip) {
   `;
 }
 
-// ---------------------------------------------------------------------
-// VISUALISASI (ringkas, dihitung dari daftar batch yang sudah dimuat)
-// ---------------------------------------------------------------------
-const PALET_KETERANGAN = ["#1B3B2C", "#C9A24D", "#B5472E", "#5C7A64", "#7F77DD", "#3B7DBF", "#8A8060"];
+async function muatDataVisualisasi() {
+  const idBatch = document.getElementById("filterBatch").value;
+  const namaBidang = document.getElementById("filterBidang").value;
 
-async function renderVisualisasi() {
-  const [batches, viz] = await Promise.all([api("/api/batches"), api("/api/visualisasi")]);
+  // Kalau satu Batch spesifik dipilih, filter Bidang otomatis tidak relevan
+  // (satu batch sudah pasti satu Bidang) — mode 'batch' menang.
+  const mode = idBatch !== "all" ? "batch" : namaBidang !== "all" ? "bidang" : "all";
+  const value = idBatch !== "all" ? idBatch : namaBidang !== "all" ? namaBidang : "";
 
-  content.innerHTML = `
-    <p style="font-size:16px;font-weight:700;margin:0 0 14px" class="judul-serif">Visualisasi</p>
+  const labelBatch = idBatch === "all"
+    ? "Seluruh Batch"
+    : document.getElementById("filterBatch").selectedOptions[0].textContent;
+  const labelBidang = mode === "batch" ? "" : namaBidang === "all" ? " · Semua Bidang" : ` · Bidang ${namaBidang}`;
 
-    <div class="kartu">
-      <p class="stat-label" style="font-weight:600;margin-bottom:12px">Komposisi Keterangan (seluruh batch)</p>
-      <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
-        <div id="donutChart"></div>
-        <div id="donutLegend" style="flex:1;min-width:180px"></div>
-      </div>
-    </div>
+  document.getElementById("konteksBanner").innerHTML = `Menampilkan data: <b>${labelBatch}${labelBidang}</b>`;
+  document.getElementById("labelDonut").textContent = `(${labelBatch}${labelBidang})`;
+  document.getElementById("labelBar").textContent = `(${labelBatch}${labelBidang})`;
+  document.getElementById("labelTrenBidang").textContent = namaBidang === "all" ? "Per Bidang (pilih salah satu di atas)" : `Bidang ${namaBidang}`;
 
-    <div class="kartu">
-      <p class="stat-label" style="font-weight:600;margin-bottom:6px">Tren Kehadiran per Bulan</p>
-      <div style="display:flex;gap:14px;font-size:11.5px;color:var(--teks-sekunder);margin-bottom:4px">
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#B5472E;margin-right:4px"></span>Alpha</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#C9A24D;margin-right:4px"></span>Sakit</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#5C7A64;margin-right:4px"></span>Terlambat</span>
-      </div>
-      <div id="trenBulanan"></div>
-    </div>
+  const viz = await api(`/api/visualisasi?filter_mode=${mode}&filter_value=${encodeURIComponent(value)}`);
 
-    <div class="kartu">
-      <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Ketidakhadiran Tanpa Keterangan (Alpha)</p>
-      <p style="font-size:11.5px;color:var(--teks-muted);margin:0 0 10px">Diurutkan berdasarkan jumlah hari, dijumlah dari seluruh batch yang tercatat</p>
-      <div id="rankingAlpha"></div>
-    </div>
-
-    <div class="kartu">
-      <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Keterlambatan Masuk Kerja</p>
-      <p style="font-size:11.5px;color:var(--teks-muted);margin:0 0 10px">Diurutkan berdasarkan jumlah hari, dijumlah dari seluruh batch yang tercatat</p>
-      <div id="rankingTerlambat"></div>
-    </div>
-
-    <div class="kartu">
-      <p class="stat-label" style="font-weight:600">Pegawai terekap per Bidang</p>
-      <div id="barPerBidang" style="margin-top:10px"></div>
-    </div>
-  `;
+  document.getElementById("statTotal").textContent = viz.statistik.total_pegawai;
+  document.getElementById("statTelat").textContent = viz.statistik.telat;
+  document.getElementById("statSakit").textContent = viz.statistik.sakit;
+  document.getElementById("statAlpha").textContent = viz.statistik.alpha;
 
   renderDonutKeterangan(viz.keterangan);
-  renderTrenBulananGaris(viz.tren_bulanan);
-  renderTabelRekap("rankingAlpha", viz.ranking_alpha);
-  renderTabelRekap("rankingTerlambat", viz.ranking_terlambat);
-  renderBarPerBidang(batches);
+  renderTrenBulananGaris("trenPerBidang", viz.tren_filter);
+  renderBarKeterlambatan(viz.ranking_terlambat);
+  renderPerbandinganBidang(viz.perbandingan_bidang || []);
+}
+
+function renderBarKeterlambatan(data) {
+  const wrap = document.getElementById("barKeterlambatan");
+  if (!data.length) {
+    wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Tidak ada catatan pada cakupan ini.</p>`;
+    return;
+  }
+  // Dibatasi ke 8 teratas supaya batangnya tetap cukup lebar dibaca dalam
+  // kartu setengah-lebar. Nama lengkap tidak muat sebagai label sumbu-X
+  // (banyak nama + gelar cukup panjang) - jadi sumbu-X cuma nomor urut,
+  // nama lengkap muncul lewat tooltip saat batangnya di-hover.
+  const tampil = data.slice(0, 8);
+  const maxNilai = Math.max(1, ...tampil.map((d) => d.jumlah));
+  const lebar = 340, tinggi = 190, ruangBawah = 22, ruangAtas = 20;
+  const tinggiBar = tinggi - ruangBawah - ruangAtas;
+  const jarak = lebar / tampil.length;
+  const lebarBar = jarak * 0.55;
+
+  const posisi = tampil.map((d, i) => {
+    const h = (d.jumlah / maxNilai) * tinggiBar;
+    return { ...d, x: i * jarak + (jarak - lebarBar) / 2, hAkhir: h, yAkhir: tinggi - ruangBawah - h };
+  });
+
+  wrap.innerHTML = `
+    <svg viewBox="0 0 ${lebar} ${tinggi}" style="width:100%;height:auto;max-height:210px;overflow:visible">
+      <line x1="0" y1="${tinggi - ruangBawah}" x2="${lebar}" y2="${tinggi - ruangBawah}" stroke="var(--border)" stroke-width="1" />
+      ${posisi
+        .map(
+          (p, i) => `
+        <rect class="batang-keterlambatan" data-index="${i}" x="${p.x}" y="${tinggi - ruangBawah}" width="${lebarBar}" height="0" rx="4" fill="#2563EB" style="cursor:pointer" />
+        <text class="label-nilai" data-index="${i}" x="${p.x + lebarBar / 2}" y="${p.yAkhir - 6}" text-anchor="middle" font-size="10.5" fill="var(--teks-sekunder)" opacity="0">${p.jumlah}</text>
+        <text x="${p.x + lebarBar / 2}" y="${tinggi - ruangBawah + 14}" text-anchor="middle" font-size="9.5" fill="var(--teks-muted)">${i + 1}</text>
+      `
+        )
+        .join("")}
+    </svg>
+  `;
+
+  // Animasi tumbuh dari 0 ke tinggi sebenarnya, seperti anak tangga muncul satu-satu
+  requestAnimationFrame(() => {
+    posisi.forEach((p, i) => {
+      const rect = wrap.querySelector(`rect[data-index="${i}"]`);
+      const label = wrap.querySelector(`text.label-nilai[data-index="${i}"]`);
+      rect.style.transition = `height .5s ease ${i * 0.04}s, y .5s ease ${i * 0.04}s`;
+      rect.setAttribute("height", p.hAkhir);
+      rect.setAttribute("y", p.yAkhir);
+      label.style.transition = `opacity .3s ease ${i * 0.04 + 0.3}s`;
+      label.setAttribute("opacity", "1");
+    });
+  });
+
+  wrap.querySelectorAll(".batang-keterlambatan").forEach((el, i) => {
+    const p = posisi[i];
+    el.addEventListener("mouseenter", () => el.setAttribute("fill", "#1D4ED8"));
+    el.addEventListener("mouseleave", () => {
+      el.setAttribute("fill", "#2563EB");
+      sembunyikanTooltip();
+    });
+    el.addEventListener("mousemove", (e) => {
+      tampilkanTooltip(`<b>${p.nama}</b><br>${p.jumlah} hari`, e.clientX, e.clientY);
+    });
+  });
 }
 
 function renderDonutKeterangan(data) {
@@ -795,7 +1092,13 @@ function renderDonutKeterangan(data) {
     .join("");
 
   document.getElementById("donutChart").innerHTML = `
-    <svg width="130" height="130" viewBox="0 0 120 120" style="transform:rotate(-90deg)">${lingkaran}</svg>
+    <div style="position:relative;width:130px;height:130px">
+      <svg width="130" height="130" viewBox="0 0 120 120" style="transform:rotate(-90deg)">${lingkaran}</svg>
+      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
+        <span style="font-size:19px;font-weight:700;color:var(--teks-utama)">${total}</span>
+        <span style="font-size:10px;color:var(--teks-muted)">hari tercatat</span>
+      </div>
+    </div>
   `;
 
   const elemenLingkaran = document.querySelectorAll("#donutChart .segmen-donut");
@@ -836,7 +1139,7 @@ function renderDonutKeterangan(data) {
   document.querySelectorAll("#donutLegend .legenda-item").forEach((item) => {
     const el = document.querySelector(`#donutChart .segmen-donut[data-index="${item.dataset.index}"]`);
     item.addEventListener("mouseenter", () => {
-      item.style.backgroundColor = "var(--krem)";
+      item.style.backgroundColor = "var(--abu-bg)";
       if (el) el.setAttribute("stroke-width", "22");
     });
     item.addEventListener("mouseleave", () => {
@@ -851,14 +1154,14 @@ function labelBulan(bulanStr) {
   return d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
 }
 
-function renderTrenBulananGaris(data) {
-  const wrap = document.getElementById("trenBulanan");
+function renderTrenBulananGaris(elId, data) {
+  const wrap = document.getElementById(elId);
   if (!data.length) {
     wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Belum ada batch dengan periode yang tercatat.</p>`;
     return;
   }
 
-  const lebar = 640, tinggi = 220, kiri = 30, kanan = 20, atas = 16, bawah = 30;
+  const lebar = 640, tinggi = 140, kiri = 30, kanan = 20, atas = 14, bawah = 24;
   const areaLebar = lebar - kiri - kanan, areaTinggi = tinggi - atas - bawah;
   const maxNilai = Math.max(1, ...data.flatMap((d) => [d.alpha, d.sakit, d.terlambat]));
   const langkahX = data.length > 1 ? areaLebar / (data.length - 1) : 0;
@@ -880,13 +1183,13 @@ function renderTrenBulananGaris(data) {
   }
 
   const seri = [
-    { kunci: "alpha", warna: "#B5472E", label: "Alpha" },
-    { kunci: "sakit", warna: "#C9A24D", label: "Sakit" },
-    { kunci: "terlambat", warna: "#5C7A64", label: "Terlambat" },
+    { kunci: "alpha", warna: "#DC2626", label: "Alpha" },
+    { kunci: "sakit", warna: "#D97706", label: "Sakit" },
+    { kunci: "terlambat", warna: "#2563EB", label: "Terlambat" },
   ];
 
   const garisGrid = [0.25, 0.5, 0.75, 1]
-    .map((f) => `<line x1="${kiri}" y1="${atas + areaTinggi * (1 - f)}" x2="${lebar - kanan}" y2="${atas + areaTinggi * (1 - f)}" stroke="var(--kartu-tepi)" stroke-width="1" />`)
+    .map((f) => `<line x1="${kiri}" y1="${atas + areaTinggi * (1 - f)}" x2="${lebar - kanan}" y2="${atas + areaTinggi * (1 - f)}" stroke="var(--border)" stroke-width="1" />`)
     .join("");
 
   const garisSeri = seri
@@ -895,7 +1198,7 @@ function renderTrenBulananGaris(data) {
       const titik = nilai.map((v, i) => posisi(v, i));
       const lingkaran = titik
         .map(
-          (t, i) => `<circle class="titik-data" cx="${t.x}" cy="${t.y}" r="4" fill="${s.warna}" stroke="#fff" stroke-width="1.5" style="transform-box:fill-box;transform-origin:center;transition:transform .15s">
+          (t, i) => `<circle class="titik-data" cx="${t.x}" cy="${t.y}" r="4" fill="${s.warna}" stroke="var(--kartu-bg)" stroke-width="1.5" style="transform-box:fill-box;transform-origin:center;transition:transform .15s">
           <title>${labelBulan(data[i].bulan)} · ${s.label}: ${nilai[i]} hari</title>
         </circle>`
         )
@@ -940,25 +1243,17 @@ function renderTrenBulananGaris(data) {
 function renderTabelRekap(elId, data) {
   const wrap = document.getElementById(elId);
   if (!data.length) {
-    wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Tidak ada catatan pada periode ini.</p>`;
+    wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic;padding:10px 14px">Tidak ada catatan pada periode ini.</p>`;
     return;
   }
-  wrap.innerHTML = `
-    <div class="tabel-wrap">
-      <div class="tabel-header-baris" style="grid-template-columns:0.5fr 2fr 1fr">
-        <span>NO</span><span>NAMA PEGAWAI</span><span style="text-align:right">JUMLAH HARI</span>
-      </div>
-      ${data
-        .map(
-          (d, i) => `<div class="tabel-baris" style="grid-template-columns:0.5fr 2fr 1fr">
-          <span style="color:var(--teks-muted)">${i + 1}</span>
-          <span>${d.nama}</span>
-          <span style="text-align:right;font-weight:600">${d.jumlah}</span>
-        </div>`
-        )
-        .join("")}
-    </div>
-  `;
+  wrap.innerHTML = data
+    .map(
+      (d, i) => `<div class="baris-rekap">
+      <span><span style="color:var(--teks-muted);margin-right:6px">${i + 1}.</span>${d.nama}</span>
+      <span style="font-weight:600">${d.jumlah} hari</span>
+    </div>`
+    )
+    .join("");
 }
 
 function renderBarPerBidang(batches) {
@@ -972,8 +1267,8 @@ function renderBarPerBidang(batches) {
     .map(
       ([bidang, jumlah]) => `<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--teks-sekunder);margin-bottom:6px">
       <span style="width:80px">${bidang}</span>
-      <div style="flex:1;background:var(--krem);border-radius:3px;height:10px">
-        <div style="width:${(jumlah / maxNilai) * 100}%;height:100%;background:var(--emas);border-radius:3px"></div>
+      <div style="flex:1;background:var(--abu-bg);border-radius:3px;height:10px">
+        <div style="width:${(jumlah / maxNilai) * 100}%;height:100%;background:var(--biru);border-radius:3px"></div>
       </div>
       <span style="width:30px;text-align:right">${jumlah}</span>
     </div>`
@@ -1011,27 +1306,160 @@ async function renderLogAktivitas() {
 // ---------------------------------------------------------------------
 // PENGATURAN — daftar keterangan
 // ---------------------------------------------------------------------
-async function renderPengaturan() {
-  const list = await api("/api/keterangan");
-  daftarKeteranganCache = list;
+// ---------------------------------------------------------------------
+// AKUN (khusus Master Admin)
+// ---------------------------------------------------------------------
+async function renderAkunList() {
+  const daftar = await api("/api/akun");
   content.innerHTML = `
-    <p style="font-size:16px;font-weight:700;margin:0 0 14px" class="judul-serif">Pengaturan</p>
+    <p style="font-size:16px;font-weight:700;margin:0 0 4px" class="judul-serif">Akun</p>
+    <p style="font-size:12px;color:var(--teks-muted);margin:0 0 18px">Kelola akun admin yang bisa login ke sistem ini. Cuma Master Admin yang bisa menambah, menonaktifkan, atau menghapus akun - admin biasa tidak melihat halaman ini sama sekali.</p>
+
+    <div class="kartu" style="margin-bottom:16px">
+      <p class="stat-label" style="font-weight:600;margin-bottom:10px">Tambah Admin Baru</p>
+      <div style="display:grid;grid-template-columns:1fr 1.3fr 1fr auto;gap:8px">
+        <input type="text" id="inputNamaAkun" placeholder="Nama" />
+        <input type="email" id="inputEmailAkun" placeholder="Email" />
+        <input type="password" id="inputPasswordAkun" placeholder="Password (min. 6 karakter)" />
+        <button class="btn-primer" onclick="tambahAkun()">Buat Akun</button>
+      </div>
+      <p id="pesanAkun" style="font-size:12px;margin:8px 0 0"></p>
+    </div>
+
+    <div class="tabel-wrap">
+      <div class="tabel-header-baris" style="grid-template-columns:1fr 1.4fr 0.8fr 0.8fr 1fr">
+        <span>NAMA</span><span>EMAIL</span><span>PERAN</span><span>STATUS</span><span></span>
+      </div>
+      ${daftar
+        .map((a) => {
+          const diriSendiri = a.user_id === currentUserId;
+          return `<div class="tabel-baris" style="grid-template-columns:1fr 1.4fr 0.8fr 0.8fr 1fr;cursor:default">
+          <span>${a.nama || "-"}${diriSendiri ? ' <span style="color:var(--teks-muted);font-size:11px">(Anda)</span>' : ""}</span>
+          <span style="color:var(--teks-sekunder)">${a.email}</span>
+          <span class="badge ${a.role === "master" ? "badge-final" : "badge-draf"}">${a.role === "master" ? "Master" : "Admin"}</span>
+          <span class="badge ${a.aktif ? "badge-final" : "badge-nonaktif"}">${a.aktif ? "Aktif" : "Nonaktif"}</span>
+          <span style="display:flex;gap:6px;justify-content:flex-end">
+            ${a.role === "master"
+              ? ""
+              : `<button class="btn-sekunder" style="padding:4px 10px;font-size:11.5px" ${diriSendiri ? "disabled" : ""} onclick="ubahStatusAkun('${a.user_id}', ${!a.aktif})">${a.aktif ? "Nonaktifkan" : "Aktifkan"}</button>
+                 <button class="btn-sekunder" style="padding:4px 10px;font-size:11.5px;color:var(--merah-teks)" ${diriSendiri ? "disabled" : ""} onclick="hapusAkun('${a.user_id}')">Hapus</button>`}
+          </span>
+        </div>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+async function tambahAkun() {
+  const nama = document.getElementById("inputNamaAkun").value.trim();
+  const email = document.getElementById("inputEmailAkun").value.trim();
+  const password = document.getElementById("inputPasswordAkun").value;
+  const pesan = document.getElementById("pesanAkun");
+  pesan.style.color = "var(--teks-muted)";
+  pesan.textContent = "Membuat akun...";
+  const hasil = await api("/api/akun", { method: "POST", body: JSON.stringify({ nama, email, password }) });
+  if (!hasil.ok) {
+    pesan.style.color = "var(--merah-teks)";
+    pesan.textContent = hasil.pesan || "Gagal membuat akun.";
+    return;
+  }
+  renderAkunList();
+}
+
+async function ubahStatusAkun(userId, aktifBaru) {
+  await api(`/api/akun/${userId}/status`, { method: "POST", body: JSON.stringify({ aktif: aktifBaru }) });
+  renderAkunList();
+}
+
+async function hapusAkun(userId) {
+  if (!confirm("Hapus akun ini? Pengguna yang bersangkutan tidak akan bisa login lagi, dan tindakan ini tidak bisa dibatalkan.")) return;
+  const hasil = await api(`/api/akun/${userId}`, { method: "DELETE" });
+  if (!hasil.ok) {
+    alert(hasil.pesan || "Gagal menghapus akun.");
+    return;
+  }
+  renderAkunList();
+}
+
+function ubahTema() {
+  const temaBaru = document.documentElement.getAttribute("data-tema") === "gelap" ? "terang" : "gelap";
+  document.documentElement.setAttribute("data-tema", temaBaru);
+  localStorage.setItem("tema", temaBaru);
+  document.getElementById("toggleTema")?.classList.toggle("aktif", temaBaru === "gelap");
+}
+
+async function renderPengaturan() {
+  const [keterangan, bidang] = await Promise.all([api("/api/keterangan"), api("/api/bidang")]);
+  daftarKeteranganCache = keterangan;
+  daftarBidangCache = bidang;
+
+  const temaSaatIni = localStorage.getItem("tema") || "terang";
+
+  content.innerHTML = `
+    <p style="font-size:16px;font-weight:700;margin:0 0 4px" class="judul-serif">Pengaturan</p>
+    <p style="font-size:12px;color:var(--teks-muted);margin:0 0 18px">Data master di bawah ini dipakai sebagai pilihan dropdown di seluruh sistem (Proses Batch, Data Harian, Ringkasan Pegawai, Visualisasi) - ubah di sini, otomatis konsisten di mana-mana.</p>
+
+    <p style="font-size:11.5px;font-weight:700;letter-spacing:.3px;color:var(--teks-muted);margin:0 0 8px;text-transform:uppercase">Tampilan</p>
+    <div class="kartu" style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <p class="stat-label" style="font-weight:600;margin-bottom:2px">Mode Gelap</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0">Ganti tampilan terang/gelap. Pilihan tersimpan otomatis di perangkat ini.</p>
+      </div>
+      <button type="button" id="toggleTema" class="sakelar-tema ${temaSaatIni === "gelap" ? "aktif" : ""}" onclick="ubahTema()" title="Ganti mode terang/gelap">
+        <span class="sakelar-tema-bulatan">
+          <svg class="ikon-matahari" viewBox="0 0 20 20" fill="none" width="12" height="12"><circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M4.2 15.8l1.4-1.4M14.4 5.6l1.4-1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <svg class="ikon-bulan" viewBox="0 0 20 20" fill="none" width="12" height="12"><path d="M16.5 12.3A6.8 6.8 0 1 1 7.7 3.5a5.3 5.3 0 0 0 8.8 8.8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        </span>
+      </button>
+    </div>
+
+    <p style="font-size:11.5px;font-weight:700;letter-spacing:.3px;color:var(--teks-muted);margin:0 0 8px;text-transform:uppercase">Data Master</p>
+
+    <div class="grid-2" style="gap:14px;margin-bottom:16px">
+      <div class="kartu">
+        <p class="stat-label" style="font-weight:600;margin-bottom:2px">Daftar Keterangan</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Pilihan dropdown "Keterangan" di tabel Data Harian</p>
+        <div id="daftarKeteranganList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:320px;overflow-y:auto">
+          ${keterangan
+            .map(
+              (k) => `<div style="display:flex;justify-content:space-between;align-items:center;border:0.5px solid var(--border);border-radius:8px;padding:8px 12px">
+              <span style="font-size:13px">${k.label}</span>
+              <button class="btn-sekunder" style="padding:4px 10px;font-size:11.5px;color:var(--merah-teks)" onclick="hapusKeterangan(${k.id})">Hapus</button>
+            </div>`
+            )
+            .join("")}
+        </div>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="inputKeteranganBaru" placeholder="Tambah keterangan baru..." style="flex:1" />
+          <button class="btn-primer" onclick="tambahKeterangan()">Tambah</button>
+        </div>
+      </div>
+
+      <div class="kartu">
+        <p class="stat-label" style="font-weight:600;margin-bottom:2px">Daftar Bidang</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Pilihan Bidang di Ringkasan Pegawai &amp; filter Visualisasi</p>
+        <div id="daftarBidangList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:320px;overflow-y:auto">
+          ${bidang
+            .map(
+              (b) => `<div style="display:flex;justify-content:space-between;align-items:center;border:0.5px solid var(--border);border-radius:8px;padding:8px 12px">
+              <span style="font-size:13px">${b.label}</span>
+              <button class="btn-sekunder" style="padding:4px 10px;font-size:11.5px;color:var(--merah-teks)" onclick="hapusBidang(${b.id})">Hapus</button>
+            </div>`
+            )
+            .join("")}
+        </div>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="inputBidangBaru" placeholder="Tambah bidang baru (mis. DATUN)..." style="flex:1" />
+          <button class="btn-primer" onclick="tambahBidang()">Tambah</button>
+        </div>
+      </div>
+    </div>
+
+    <p style="font-size:11.5px;font-weight:700;letter-spacing:.3px;color:var(--teks-muted);margin:0 0 8px;text-transform:uppercase">Tentang</p>
     <div class="kartu">
-      <p class="stat-label" style="font-weight:600;margin-bottom:10px">Daftar Keterangan (dropdown)</p>
-      <div id="daftarKeteranganList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
-        ${list
-          .map(
-            (k) => `<div style="display:flex;justify-content:space-between;align-items:center;border:0.5px solid var(--kartu-tepi);border-radius:8px;padding:8px 12px">
-            <span style="font-size:13px">${k.label}</span>
-            <button class="btn-sekunder" style="padding:4px 10px;font-size:11.5px;color:var(--merah-teks)" onclick="hapusKeterangan(${k.id})">Hapus</button>
-          </div>`
-          )
-          .join("")}
-      </div>
-      <div style="display:flex;gap:8px">
-        <input type="text" id="inputKeteranganBaru" placeholder="Tambah keterangan baru..." style="flex:1" />
-        <button class="btn-primer" onclick="tambahKeterangan()">Tambah</button>
-      </div>
+      <p style="font-size:12.5px;color:var(--teks-sekunder);margin:0 0 6px"><b>Sistem Rekapitulasi Absensi</b> — Kejaksaan Tinggi Jawa Tengah, Bidang Daskrimti</p>
+      <p style="font-size:11.5px;color:var(--teks-muted);margin:0">Masuk sebagai <b>${document.getElementById("userEmail")?.textContent || "-"}</b>. Penambahan/penghapusan akun admin dikelola langsung dari Supabase Dashboard (Authentication → Users), bukan dari halaman ini.</p>
     </div>
   `;
 }
@@ -1041,6 +1469,7 @@ async function tambahKeterangan() {
   const label = input.value.trim();
   if (!label) return;
   await api("/api/keterangan", { method: "POST", body: JSON.stringify({ label }) });
+  daftarKeteranganCache = null;
   renderPengaturan();
 }
 
@@ -1048,6 +1477,22 @@ async function hapusKeterangan(id) {
   if (!confirm("Hapus keterangan ini dari daftar dropdown?")) return;
   await api(`/api/keterangan/${id}`, { method: "DELETE" });
   daftarKeteranganCache = null;
+  renderPengaturan();
+}
+
+async function tambahBidang() {
+  const input = document.getElementById("inputBidangBaru");
+  const label = input.value.trim();
+  if (!label) return;
+  await api("/api/bidang", { method: "POST", body: JSON.stringify({ label }) });
+  daftarBidangCache = null;
+  renderPengaturan();
+}
+
+async function hapusBidang(id) {
+  if (!confirm("Hapus bidang ini dari daftar? Pegawai yang sudah ditandai bidang ini di batch lama tidak akan ikut terhapus, cuma tidak muncul lagi sebagai pilihan baru.")) return;
+  await api(`/api/bidang/${id}`, { method: "DELETE" });
+  daftarBidangCache = null;
   renderPengaturan();
 }
 

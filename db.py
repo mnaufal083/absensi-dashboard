@@ -9,6 +9,7 @@ Memakai SERVICE ROLE KEY (bukan anon key) karena ini backend server-side
 tepercaya - lihat penjelasan di README_INTEGRASI.md.
 """
 import os
+import httpx
 from datetime import datetime, timezone
 from supabase import create_client, Client
 
@@ -17,20 +18,125 @@ SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+# ---------------------------------------------------------------------
+# Perbaikan "httpx.RemoteProtocolError: Server disconnected" / "Server
+# disconnected without sending a response" yang SESEKALI muncul.
+#
+# Penyebabnya: koneksi HTTP yang disimpan (keep-alive) oleh httpx ke
+# Supabase kadang ditutup diam-diam oleh server setelah idle beberapa
+# saat. Permintaan BERIKUTNYA yang mencoba memakai ulang koneksi basi itu
+# akan gagal dengan error ini — bukan bug di kode kita, tapi httpx
+# defaultnya TIDAK otomatis mencoba ulang saat ini terjadi (retries=0).
+#
+# Solusinya: pasang ulang transport bawaan httpx dengan retries>0, supaya
+# httpx sendiri yang otomatis membuka koneksi baru & mencoba ulang di
+# level jaringan sebelum errornya sempat naik ke kode Python kita.
+# ---------------------------------------------------------------------
+_transport_retry = httpx.HTTPTransport(retries=2)
+supabase.postgrest.session._transport = _transport_retry
+try:
+    supabase.auth._http_client._transport = _transport_retry
+except AttributeError:
+    pass  # versi supabase-py tertentu punya struktur auth client sedikit berbeda; aman diabaikan
+
+_HALAMAN = 1000  # batas baris per request bawaan PostgREST/Supabase
+
+
+def _ambil_semua(builder):
+    """Ambil SEMUA baris dari sebuah query Supabase yang belum dieksekusi,
+    sekalipun jumlahnya melebihi batas 1000 baris per request bawaan
+    PostgREST. Tanpa ini, tabel besar (mis. attendance_records ratusan
+    pegawai x puluhan hari) akan terpotong diam-diam ke 1000 baris pertama
+    saja - itu sebabnya jumlah pegawai di tab Data Harian bisa lebih
+    sedikit dari jumlah sebenarnya."""
+    semua = []
+    awal = 0
+    while True:
+        potongan = builder.range(awal, awal + _HALAMAN - 1).execute().data
+        semua.extend(potongan)
+        if len(potongan) < _HALAMAN:
+            break
+        awal += _HALAMAN
+    return semua
+
 
 # ---------------------------------------------------------------------------
 # AUTH
 # ---------------------------------------------------------------------------
 def login(email: str, password: str):
-    """Login pakai Supabase Auth. Mengembalikan (user_dict, access_token) kalau
-    berhasil, atau (None, None) kalau email/password salah."""
+    """Login pakai Supabase Auth. Mengembalikan (user_dict, access_token, error)
+    - user_dict berisi id/email/nama/role kalau berhasil, atau (None, None,
+    pesan_error) kalau gagal (password salah ATAU akun dinonaktifkan Master
+    Admin)."""
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-        if res.user:
-            return {"id": res.user.id, "email": res.user.email}, res.session.access_token
     except Exception:
-        pass
-    return None, None
+        return None, None, "Email atau password salah"
+    if not res.user:
+        return None, None, "Email atau password salah"
+
+    profil = ambil_atau_buat_profil(res.user.id, res.user.email)
+    if not profil["aktif"]:
+        return None, None, "Akun ini sudah dinonaktifkan oleh Master Admin. Hubungi Master Admin kalau ini keliru."
+
+    user = {
+        "id": res.user.id, "email": res.user.email,
+        "nama": profil.get("nama") or "", "role": profil.get("role", "admin"),
+    }
+    return user, res.session.access_token, None
+
+
+# ---------------------------------------------------------------------------
+# AKUN (khusus Master Admin) - manajemen admin lain lewat dashboard, bukan
+# langsung dari Supabase. Memakai Supabase Auth Admin API (supabase.auth.admin),
+# tersedia karena kita pakai SERVICE_ROLE_KEY, bukan anon key.
+# ---------------------------------------------------------------------------
+def ambil_atau_buat_profil(user_id, email):
+    """Ambil baris admin_profiles untuk user ini; kalau belum ada (mis. akun
+    lama yang dibuat manual dari Supabase Dashboard sebelum fitur ini ada),
+    buat otomatis dengan role='admin' & aktif=True (paling minim hak akses
+    secara default, aman)."""
+    ada = supabase.table("admin_profiles").select("*").eq("user_id", user_id).limit(1).execute().data
+    if ada:
+        return ada[0]
+    baru = {"user_id": user_id, "email": email, "role": "admin", "aktif": True}
+    supabase.table("admin_profiles").insert(baru).execute()
+    return baru
+
+
+def ambil_profil(user_id):
+    hasil = supabase.table("admin_profiles").select("*").eq("user_id", user_id).limit(1).execute().data
+    return hasil[0] if hasil else None
+
+
+def daftar_akun():
+    return supabase.table("admin_profiles").select("*").order("dibuat_pada").execute().data
+
+
+def buat_akun_admin(email, password, nama):
+    """Dipanggil Master Admin lewat halaman Akun. Akun baru SELALU dibuat
+    dengan role='admin' (bukan master) - satu-satunya cara menambah Master
+    Admin lain adalah lewat SQL manual di Supabase, sesuai desain sengaja:
+    supaya kewenangan tertinggi tidak bisa diperbanyak sembarangan dari UI."""
+    hasil = supabase.auth.admin.create_user({
+        "email": email,
+        "password": password,
+        "email_confirm": True,  # tidak perlu verifikasi email, langsung bisa login
+        "user_metadata": {"nama": nama},
+    })
+    supabase.table("admin_profiles").insert({
+        "user_id": hasil.user.id, "email": email, "nama": nama, "role": "admin", "aktif": True,
+    }).execute()
+    return hasil.user.id
+
+
+def set_status_akun(user_id, aktif):
+    supabase.table("admin_profiles").update({"aktif": aktif}).eq("user_id", user_id).execute()
+
+
+def hapus_akun(user_id):
+    supabase.auth.admin.delete_user(user_id)
+    supabase.table("admin_profiles").delete().eq("user_id", user_id).execute()
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +171,14 @@ def tandai_final(batch_id):
     supabase.table("batches").update({"status": "final"}).eq("id", batch_id).execute()
 
 
+def tandai_draft(batch_id):
+    """Kembalikan batch yang sudah final ke status draf lagi - dipakai kalau
+    admin perlu mengoreksi data lebih lanjut setelah sempat difinalisasi.
+    Field harian/ringkasan cuma bisa diedit saat status='draft' (lihat
+    pengecekan disabled di dashboard.js)."""
+    supabase.table("batches").update({"status": "draft"}).eq("id", batch_id).execute()
+
+
 def catat_unduhan(batch_id, user_id):
     supabase.table("batches").update({
         "diunduh_pada": datetime.now(timezone.utc).isoformat(),
@@ -86,13 +200,14 @@ _MAP_ROW = {
     "Sub Unit Kerja": "sub_unit_kerja", "Jabatan": "jabatan", "Tanggal": "tanggal",
     "Jadwal Masuk": "jadwal_masuk", "Jadwal Pulang": "jadwal_pulang",
     "Jam Masuk": "jam_masuk", "Jam Keluar": "jam_keluar",
-    "Datang Awal": "datang_awal", "Datang Telat": "datang_telat",
-    "Pulang Awal": "pulang_awal", "Pulang Telat": "pulang_telat",
-    "Jumlah Jam Kerja": "jumlah_jam_kerja", "Keterangan": "keterangan",
+    "Telat": "datang_telat",  # dihitung sendiri (Jam Masuk vs Jadwal Masuk), bukan dari kolom PDF
+    "Keterangan": "keterangan",
+    "Bidang": "bidang",
     "Sumber File": "sumber_file",
 }
 _MAP_RINGKASAN = {
     "Nama": "nama", "NIP": "nip", "NRP": "nrp", "Golongan": "golongan",
+    "Bidang": "bidang",
     "Terlambat (Hari)": "terlambat", "Pulang Cepat (Hari)": "pulang_cepat",
     "Tidak Absen Datang (Hari)": "tidak_absen_datang",
     "Tidak Absen Pulang (Hari)": "tidak_absen_pulang",
@@ -102,6 +217,7 @@ _MAP_RINGKASAN = {
     "Rincian Cuti": "rincian_cuti", "Total Hari Kerja": "total_hari_kerja",
     "Sumber File": "sumber_file",
 }
+_FIELD_TEKS_RINGKASAN = ("nama", "nip", "nrp", "golongan", "bidang", "rincian_cuti", "sumber_file")
 
 
 def _angka(v):
@@ -126,14 +242,28 @@ def simpan_hasil_ekstraksi(batch_id, rows, ringkasan_list, berkas_bermasalah_lis
             supabase.table("attendance_records").insert(payload[i:i + 500]).execute()
 
     if ringkasan_list:
+        # PERBAIKAN (26 Jul 2026): kolom "bidang" per pegawai dulu SELALU
+        # kosong saat disimpan (cuma bisa terisi lewat koreksi manual satu-
+        # satu di tab Ringkasan Pegawai) - itu sebabnya chart "Perbandingan
+        # Antar Bidang" di Visualisasi praktis kosong untuk hampir semua
+        # Bidang. Sekarang: kalau batch ini SUDAH ditandai 1 Bidang spesifik
+        # saat upload (bukan "Campuran/belum ditentukan"), semua pegawai di
+        # batch ini otomatis ikut ditandai Bidang yang sama. Koreksi manual
+        # jadi cuma perlu dilakukan untuk batch yang SUNGGUH campuran lintas
+        # Bidang, bukan untuk semua batch.
+        batch = ambil_batch(batch_id)
+        bidang_batch = (batch or {}).get("nama_bidang") or ""
+
         payload = []
         for r in ringkasan_list:
             item = {"batch_id": batch_id}
             for k_asal, k_db in _MAP_RINGKASAN.items():
                 val = r.get(k_asal, "")
-                item[k_db] = _angka(val) if k_db not in ("nama", "nip", "nrp", "golongan", "rincian_cuti", "sumber_file") else val
+                item[k_db] = _angka(val) if k_db not in _FIELD_TEKS_RINGKASAN else val
             item["sub_unit_kerja"] = r.get("_sub_unit", "")
             item["jabatan"] = r.get("_jabatan", "")
+            if bidang_batch:
+                item["bidang"] = bidang_batch
             payload.append(item)
         for i in range(0, len(payload), 500):
             supabase.table("ringkasan_pegawai").insert(payload[i:i + 500]).execute()
@@ -154,12 +284,13 @@ def perbarui_jumlah_pegawai(batch_id):
 def perbarui_periode_batch(batch_id):
     """Hitung tanggal absensi paling awal & akhir dari DATA (bukan nama file),
     lalu simpan ke batch supaya tidak perlu dihitung ulang tiap kali dibuka."""
-    rows = supabase.table("attendance_records").select("tanggal").eq("batch_id", batch_id).execute().data
+    q = supabase.table("attendance_records").select("tanggal").eq("batch_id", batch_id)
+    rows = _ambil_semua(q)
     tanggal_valid = []
     for r in rows:
         try:
-            # format keluaran extractor.py: "dd/mm/yyyy"
-            tanggal_valid.append(datetime.strptime(r["tanggal"], "%d/%m/%Y").date())
+            # format keluaran extractor.py sekarang: ISO "yyyy-mm-dd"
+            tanggal_valid.append(datetime.strptime(r["tanggal"], "%Y-%m-%d").date())
         except (ValueError, TypeError, KeyError):
             continue
     if not tanggal_valid:
@@ -173,8 +304,9 @@ def perbarui_periode_batch(batch_id):
 
 
 def ambil_attendance(batch_id):
-    return supabase.table("attendance_records").select("*").eq("batch_id", batch_id)\
-        .order("nama").order("tanggal").execute().data
+    q = supabase.table("attendance_records").select("*").eq("batch_id", batch_id)\
+        .order("nama").order("tanggal")
+    return _ambil_semua(q)
 
 
 def ambil_ringkasan(batch_id):
@@ -185,14 +317,76 @@ def ambil_ringkasan(batch_id):
 def ambil_ringkasan_semua_batch():
     """Semua baris ringkasan_pegawai lintas batch, dilengkapi info periode &
     bidang dari batch induknya — dipakai untuk agregasi di menu Visualisasi."""
-    return supabase.table("ringkasan_pegawai").select(
+    q = supabase.table("ringkasan_pegawai").select(
         "nama,nip,terlambat,sakit,izin,alpha,batch_id,"
         "batches(label,periode_awal,periode_akhir,nama_bidang)"
-    ).execute().data
+    )
+    return _ambil_semua(q)
 
 
 def ambil_berkas_bermasalah(batch_id):
     return supabase.table("berkas_bermasalah").select("*").eq("batch_id", batch_id).execute().data
+
+
+# ---------------------------------------------------------------------------
+# DETEKSI DUPLIKAT (dibangun ulang 23 Jul 2026, scope diperluas 23 Jul 2026
+# sore jadi LINTAS BATCH atas permintaan - sebelumnya cuma dicek dalam SATU
+# batch yang sama, sehingga file yang sama diproses ulang di batch BARU
+# tidak tertangkap). Dua lapis:
+#   1) batch_file_hashes         -> file identik byte-per-byte (nama beda pun tetap kena)
+#   2) batch_pegawai_signature   -> data harian satu pegawai identik walau file
+#                                    beda byte-nya (kasus file diekspor ulang)
+# batch_id TETAP dicatat saat menyimpan (supaya tahu file/pegawai itu
+# pertama kali muncul di batch mana), tapi PENGECEKANNYA tidak lagi
+# difilter ke batch_id tertentu - dicek ke SELURUH riwayat, batch apa pun.
+# ---------------------------------------------------------------------------
+def cek_dan_catat_hash_file(batch_id, file_hash, nama_file):
+    """Return {'nama_file':..., 'batch_label':...} kalau hash ini SUDAH
+    PERNAH tercatat di batch MANA PUN (termasuk batch lain, bukan cuma
+    batch yang sedang diproses sekarang), atau None kalau belum pernah ada
+    sama sekali (sekaligus langsung dicatat sebagai baru).
+
+    Dibungkus try/except supaya kalau tabel batch_file_hashes belum dibuat
+    di Supabase (atau ada gangguan koneksi sesaat), deteksi duplikat GAGAL
+    DENGAN AMAN (dianggap tidak duplikat) alih-alih membuat SELURUH proses
+    upload file tersebut ikut gagal/error."""
+    try:
+        ada = supabase.table("batch_file_hashes").select("nama_file,batches(label)")\
+            .eq("file_hash", file_hash).limit(1).execute().data
+        if ada:
+            label = ((ada[0].get("batches") or {}) or {}).get("label", "")
+            return {"nama_file": ada[0]["nama_file"], "batch_label": label}
+        supabase.table("batch_file_hashes").insert({
+            "batch_id": batch_id, "file_hash": file_hash, "nama_file": nama_file,
+        }).execute()
+        return None
+    except Exception as e:
+        print(f"[deteksi-duplikat] cek_dan_catat_hash_file gagal (dilewati, dianggap bukan duplikat): {e}")
+        return None
+
+
+def cek_dan_catat_signature_pegawai(batch_id, nip, signature, nama_file):
+    """Return {'nama_file':..., 'batch_label':...} kalau signature data
+    harian ini (untuk NIP yang sama) SUDAH PERNAH tercatat di batch MANA
+    PUN, atau None kalau belum pernah ada sama sekali (sekaligus langsung
+    dicatat sebagai baru).
+
+    Sama seperti di atas, dibungkus try/except supaya kalau tabel
+    batch_pegawai_signature bermasalah, ini tidak menjatuhkan seluruh
+    proses ekstraksi pegawai yang bersangkutan."""
+    try:
+        ada = supabase.table("batch_pegawai_signature").select("nama_file,batches(label)")\
+            .eq("nip", nip).eq("signature", signature).limit(1).execute().data
+        if ada:
+            label = ((ada[0].get("batches") or {}) or {}).get("label", "")
+            return {"nama_file": ada[0]["nama_file"], "batch_label": label}
+        supabase.table("batch_pegawai_signature").insert({
+            "batch_id": batch_id, "nip": nip, "signature": signature, "nama_file": nama_file,
+        }).execute()
+        return None
+    except Exception as e:
+        print(f"[deteksi-duplikat] cek_dan_catat_signature_pegawai gagal (dilewati, dianggap bukan duplikat): {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -228,12 +422,47 @@ def log_aktivitas(limit=100):
 
 
 # ---------------------------------------------------------------------
-# VISUALISASI (agregasi untuk grafik)
+# VISUALISASI (agregasi untuk grafik) — semuanya mendukung filter tunggal:
+# mode='all' (akumulasi semua), mode='bidang' (value=nama Bidang),
+# atau mode='batch' (value=id batch spesifik).
+#
+# CATATAN PENTING: mode='bidang' memfilter berdasarkan kolom `bidang` di
+# tabel ringkasan_pegawai/attendance_records (per-PEGAWAI), BUKAN
+# batches.nama_bidang (per-BATCH). Ini supaya satu batch gabungan yang
+# berisi banyak Bidang sekaligus (upload 372 file tanpa nama_bidang manual)
+# tetap bisa difilter dengan benar per Bidang, asalkan kolom `bidang`
+# tiap pegawai sudah diisi (otomatis kalau diisi manual saat upload, atau
+# dikoreksi satu per satu lewat tab Ringkasan Pegawai).
 # ---------------------------------------------------------------------
-def agregasi_keterangan():
+def _terapkan_filter(q, mode, value, kolom_bidang="bidang"):
+    """Tempelkan filter ke query Supabase sesuai mode. mode='batch' filter
+    by batch_id, mode='bidang' filter by kolom bidang (ilike), mode='all'
+    tidak menambah filter apa pun."""
+    if mode == "batch" and value:
+        return q.eq("batch_id", value)
+    if mode == "bidang" and value:
+        return q.ilike(kolom_bidang, value)
+    return q
+
+
+def statistik_ringkas(mode="all", value=None):
+    q = supabase.table("ringkasan_pegawai").select("terlambat,sakit,alpha")
+    q = _terapkan_filter(q, mode, value)
+    rows = _ambil_semua(q)
+    return {
+        "total_pegawai": len(rows),
+        "telat": sum(r.get("terlambat") or 0 for r in rows),
+        "alpha": sum(r.get("alpha") or 0 for r in rows),
+        "sakit": sum(r.get("sakit") or 0 for r in rows),
+    }
+
+
+def agregasi_keterangan(mode="all", value=None):
     """Hitung jumlah baris harian per jenis Keterangan (Hadir/Sakit/Izin/dst),
-    dijumlah dari SEMUA batch. Dipakai untuk donut chart."""
-    rows = supabase.table("attendance_records").select("keterangan").execute().data
+    sesuai cakupan filter. Dipakai untuk donut chart."""
+    q = supabase.table("attendance_records").select("keterangan")
+    q = _terapkan_filter(q, mode, value)
+    rows = _ambil_semua(q)
     hasil = {}
     for r in rows:
         k = r.get("keterangan") or "Tidak diketahui"
@@ -241,10 +470,13 @@ def agregasi_keterangan():
     return hasil
 
 
-def tren_bulanan():
-    """Jumlahkan Terlambat/Sakit/Alpha/Izin per bulan (berdasarkan periode_akhir
-    batch), dipakai untuk grafik batang bertumpuk per bulan."""
+def tren_bulanan(mode="all", value=None):
+    """Jumlahkan Terlambat/Sakit/Alpha per bulan (berdasarkan periode_akhir
+    batch), sesuai cakupan filter. Dipakai untuk grafik tren garis."""
     batches = supabase.table("batches").select("id, periode_akhir").execute().data
+    if mode == "batch" and value:
+        batches = [b for b in batches if b["id"] == value]
+
     bulan_ke_batch = {}
     for b in batches:
         if not b.get("periode_akhir"):
@@ -254,8 +486,10 @@ def tren_bulanan():
 
     hasil = []
     for bulan, batch_ids in sorted(bulan_ke_batch.items()):
-        ringkasan = (supabase.table("ringkasan_pegawai").select("terlambat,sakit,alpha")
-                     .in_("batch_id", batch_ids).execute().data)
+        q = supabase.table("ringkasan_pegawai").select("terlambat,sakit,alpha").in_("batch_id", batch_ids)
+        if mode == "bidang" and value:
+            q = q.ilike("bidang", value)
+        ringkasan = _ambil_semua(q)
         hasil.append({
             "bulan": bulan,
             "terlambat": sum(r.get("terlambat") or 0 for r in ringkasan),
@@ -265,10 +499,13 @@ def tren_bulanan():
     return hasil
 
 
-def ranking_pegawai(field, limit=5):
-    """field: 'alpha' atau 'terlambat'. Ranking dijumlah lintas semua
-    batch per pegawai (dikelompokkan by NIP), bukan per-batch."""
-    rows = supabase.table("ringkasan_pegawai").select(f"nama,nip,{field}").execute().data
+def ranking_pegawai(field, mode="all", value=None, limit=5):
+    """field: 'alpha' atau 'terlambat'. Ranking dijumlah sesuai cakupan
+    filter, dikelompokkan per pegawai (by NIP) supaya lintas-batch tetap
+    terjumlah jadi satu jika mode='all' atau 'bidang'."""
+    q = supabase.table("ringkasan_pegawai").select(f"nama,nip,{field}")
+    q = _terapkan_filter(q, mode, value)
+    rows = _ambil_semua(q)
     total = {}
     for r in rows:
         kunci = r.get("nip") or r.get("nama")
@@ -279,18 +516,72 @@ def ranking_pegawai(field, limit=5):
     return [x for x in urut if x["jumlah"] > 0][:limit]
 
 
+def daftar_bidang():
+    return supabase.table("bidang_master").select("*").order("urutan").execute().data
+
+
+def tambah_bidang(label):
+    urutan_max = supabase.table("bidang_master").select("urutan").order("urutan", desc=True).limit(1).execute().data
+    urutan_baru = (urutan_max[0]["urutan"] + 1) if urutan_max else 1
+    supabase.table("bidang_master").insert({"label": label.strip().upper(), "urutan": urutan_baru}).execute()
+
+
+def hapus_bidang(bidang_id):
+    supabase.table("bidang_master").delete().eq("id", bidang_id).execute()
+
+
+def perbandingan_bidang(batch_id=None):
+    """Rekap Total Pegawai/Telat/Alpha per Bidang tetap, dipakai untuk grafik
+    batang perbandingan di Visualisasi. Kalau batch_id diisi, dibatasi ke
+    satu batch itu saja; kalau tidak, dijumlah dari semua batch.
+
+    PERBAIKAN (25 Jul 2026): daftar Bidang dulu hardcode langsung di sini
+    (dan terpisah lagi di dashboard.js - dua sumber yang harus disinkron
+    manual, pernah bikin "DATUN" ketinggalan di salah satu file). Sekarang
+    diambil dari bidang_master (dikelola dari halaman Pengaturan), satu
+    sumber data yang sama dipakai backend maupun frontend."""
+    hasil = []
+    for b in daftar_bidang():
+        nama_bidang = b["label"]
+        q = supabase.table("ringkasan_pegawai").select("terlambat,alpha").ilike("bidang", nama_bidang)
+        if batch_id:
+            q = q.eq("batch_id", batch_id)
+        rows = _ambil_semua(q)
+        hasil.append({
+            "bidang": nama_bidang,
+            "total_pegawai": len(rows),
+            "telat": sum(r.get("terlambat") or 0 for r in rows),
+            "alpha": sum(r.get("alpha") or 0 for r in rows),
+        })
+    return hasil
+
+
 def cari_pegawai(kata_kunci):
-    hasil_nama = supabase.table("attendance_records").select(
-        "nama,nip,sub_unit_kerja,batch_id"
+    # Dicari dari ringkasan_pegawai (SATU baris per pegawai per batch), BUKAN
+    # dari attendance_records (bisa 20-30 baris per pegawai per bulan) —
+    # supaya limit tidak habis cuma untuk 1-2 pegawai sebelum sempat
+    # menjangkau pegawai lain yang juga cocok dengan kata kuncinya.
+    #
+    # PERBAIKAN (27 Jul 2026): pencarian NIP dulu "mengandung di mana saja"
+    # (%kata_kunci%) - jadi mengetik "192" bisa cocok dengan NIP yang
+    # kebetulan ada "192" di TENGAH (mis. "...121192..."), padahal NIP di
+    # Indonesia berformat tanggal lahir di 8 digit AWAL (YYYYMMDD). Hasilnya
+    # terasa acak/tidak nyambung dengan angka yang diketik. Sekarang
+    # pencarian NIP dicocokkan dari AWAL saja (prefix), sesuai cara orang
+    # biasa mengetik NIP (mis. tahun lahir). Pencarian Nama tetap "mengandung
+    # di mana saja" karena nama biasanya dicari sebagian kata di tengah pun
+    # (mis. nama belakang), itu perilaku yang wajar untuk teks.
+    hasil_nama = supabase.table("ringkasan_pegawai").select(
+        "nama,nip,sub_unit_kerja,bidang,batch_id"
     ).ilike("nama", f"%{kata_kunci}%").limit(50).execute().data
-    hasil_nip = supabase.table("attendance_records").select(
-        "nama,nip,sub_unit_kerja,batch_id"
-    ).ilike("nip", f"%{kata_kunci}%").limit(50).execute().data
+    hasil_nip = supabase.table("ringkasan_pegawai").select(
+        "nama,nip,sub_unit_kerja,bidang,batch_id"
+    ).ilike("nip", f"{kata_kunci}%").limit(50).execute().data
 
     unik = {}
     for r in hasil_nama + hasil_nip:
         unik[(r["nama"], r["nip"])] = r
-    return list(unik.values())
+    return sorted(unik.values(), key=lambda r: r["nama"])
 
 
 def riwayat_pegawai(nip):

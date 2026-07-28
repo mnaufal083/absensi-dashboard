@@ -4,11 +4,22 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Masuk — Sistem Rekapitulasi Absensi</title>
+<script>
+  (function () {
+    try {
+      var tema = localStorage.getItem("tema") || "terang";
+      document.documentElement.setAttribute("data-tema", tema);
+    } catch (e) {}
+  })();
+</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
 <body class="login-body">
   <div class="login-card">
-    <div class="login-badge">⚖</div>
+    <div class="login-badge">
+      <img src="{{ url_for('static', filename='img/logo-kejaksaan.png') }}" alt="Logo Kejaksaan" class="brand-logo"
+           onerror="this.onerror=null; this.replaceWith(Object.assign(document.createElement('span'), {textContent:'⚖', className:'logo-fallback'}));" />
+    </div>
     <p class="login-eyebrow">KEJAKSAAN TINGGI JAWA TENGAH — BIDANG DASKRIMTI</p>
     <h1 class="login-title">Sistem Rekapitulasi Absensi</h1>
 

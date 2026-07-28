@@ -4,12 +4,25 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Sistem Rekapitulasi Absensi — Bidang Daskrimti</title>
+<script>
+  // Diterapkan SEBELUM CSS/body dirender, supaya tidak ada kedipan putih
+  // sesaat sebelum tema gelap tersimpan sempat terpasang.
+  (function () {
+    try {
+      var tema = localStorage.getItem("tema") || "terang";
+      document.documentElement.setAttribute("data-tema", tema);
+    } catch (e) {}
+  })();
+</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
-<body>
+<body data-user-id="{{ user.id }}">
   <header class="topbar">
     <div class="topbar-left">
-      <div class="brand-badge">⚖</div>
+      <div class="brand-badge">
+        <img src="{{ url_for('static', filename='img/logo-kejaksaan.png') }}" alt="Logo Kejaksaan" class="brand-logo"
+             onerror="this.onerror=null; this.replaceWith(Object.assign(document.createElement('span'), {textContent:'⚖', className:'logo-fallback'}));" />
+      </div>
       <div>
         <p class="brand-eyebrow">KEJAKSAAN TINGGI JAWA TENGAH — BIDANG DASKRIMTI</p>
         <p class="brand-title">Sistem Rekapitulasi Absensi</p>
@@ -17,20 +30,47 @@
     </div>
     <div class="topbar-right">
       <span class="dot-online"></span>
-      <span>{{ user.email }}</span>
+      <span id="userEmail">{{ user.email }}</span>
       <a href="{{ url_for('logout') }}" class="btn-keluar">Keluar</a>
     </div>
   </header>
 
   <div class="layout">
     <nav class="sidebar" id="sidebar">
-      <button class="nav-btn active" data-tab="beranda">🏠 Beranda</button>
-      <button class="nav-btn" data-tab="proses">⬆️ Proses batch baru</button>
-      <button class="nav-btn" data-tab="riwayat">🗂️ Riwayat batch</button>
-      <button class="nav-btn" data-tab="cari">🔍 Cari pegawai</button>
-      <button class="nav-btn" data-tab="visual">📈 Visualisasi</button>
-      <button class="nav-btn" data-tab="log">🕒 Log aktivitas</button>
-      <button class="nav-btn" data-tab="pengaturan">⚙️ Pengaturan</button>
+      <button class="nav-btn active" data-tab="beranda">
+        <svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M3 8.5L10 3l7 5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 8v7a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.5 16v-4h5v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Beranda
+      </button>
+      <button class="nav-btn" data-tab="proses">
+        <svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M10 13V4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M6.5 7.5L10 4l3.5 3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        Proses batch baru
+      </button>
+      <button class="nav-btn" data-tab="riwayat">
+        <svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M3 6a1 1 0 0 1 1-1h4l1.5 2H16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        Riwayat batch
+      </button>
+      <button class="nav-btn" data-tab="cari">
+        <svg class="ikon" viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.7"/><line x1="13.2" y1="13.2" x2="17" y2="17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        Cari pegawai
+      </button>
+      <button class="nav-btn" data-tab="visual">
+        <svg class="ikon" viewBox="0 0 20 20" fill="none"><rect x="4" y="10" width="3" height="7" rx="0.8" fill="currentColor"/><rect x="8.5" y="5.5" width="3" height="11.5" rx="0.8" fill="currentColor"/><rect x="13" y="8" width="3" height="9" rx="0.8" fill="currentColor"/></svg>
+        Visualisasi
+      </button>
+      <button class="nav-btn" data-tab="log">
+        <svg class="ikon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.7"/><path d="M10 6.5V10l2.6 1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Log aktivitas
+      </button>
+      {% if user.role == 'master' %}
+      <button class="nav-btn" data-tab="akun">
+        <svg class="ikon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M4 17c0-3 2.7-5 6-5s6 2 6 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16.5 4.5v4M14.5 6.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Akun
+      </button>
+      {% endif %}
+      <button class="nav-btn" data-tab="pengaturan">
+        <svg class="ikon" viewBox="0 0 20 20" fill="none"><line x1="4" y1="6" x2="16" y2="6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><line x1="4" y1="10" x2="16" y2="10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="13" cy="10" r="1.6" fill="currentColor"/><line x1="4" y1="14" x2="16" y2="14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14" r="1.6" fill="currentColor"/></svg>
+        Pengaturan
+      </button>
     </nav>
 
     <main id="content" class="content">
