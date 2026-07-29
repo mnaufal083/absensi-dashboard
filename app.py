@@ -522,7 +522,7 @@ def api_akun():
         try:
             db.buat_akun_admin(email, password, nama)
         except Exception as e:
-            return jsonify({"ok": False, "pesan": f"Gagal membuat akun (mungkin email sudah dipakai): {e}"}), 400
+            return jsonify({"ok": False, "pesan": f"Gagal membuat akun: {e}"}), 400
         return jsonify({"ok": True})
     return jsonify(db.daftar_akun())
 

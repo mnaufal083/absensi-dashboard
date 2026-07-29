@@ -1312,16 +1312,22 @@ async function renderLogAktivitas() {
 async function renderAkunList() {
   const daftar = await api("/api/akun");
   content.innerHTML = `
-    <p style="font-size:16px;font-weight:700;margin:0 0 4px" class="judul-serif">Akun</p>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+      <p style="font-size:16px;font-weight:700;margin:0" class="judul-serif">Akun</p>
+      <button class="btn-primer" id="btnBukaFormAkun" onclick="toggleFormAkun()">+ Tambah Admin</button>
+    </div>
     <p style="font-size:12px;color:var(--teks-muted);margin:0 0 18px">Kelola akun admin yang bisa login ke sistem ini. Cuma Master Admin yang bisa menambah, menonaktifkan, atau menghapus akun - admin biasa tidak melihat halaman ini sama sekali.</p>
 
-    <div class="kartu" style="margin-bottom:16px">
-      <p class="stat-label" style="font-weight:600;margin-bottom:10px">Tambah Admin Baru</p>
-      <div style="display:grid;grid-template-columns:1fr 1.3fr 1fr auto;gap:8px">
+    <div class="kartu" id="formTambahAkun" style="margin-bottom:16px;display:none">
+      <p class="stat-label" style="font-weight:600;margin-bottom:10px">Buat Akun Admin Baru</p>
+      <div style="display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:8px;margin-bottom:8px">
         <input type="text" id="inputNamaAkun" placeholder="Nama" />
         <input type="email" id="inputEmailAkun" placeholder="Email" />
         <input type="password" id="inputPasswordAkun" placeholder="Password (min. 6 karakter)" />
+      </div>
+      <div style="display:flex;gap:8px">
         <button class="btn-primer" onclick="tambahAkun()">Buat Akun</button>
+        <button class="btn-sekunder" onclick="toggleFormAkun(false)">Batal</button>
       </div>
       <p id="pesanAkun" style="font-size:12px;margin:8px 0 0"></p>
     </div>
@@ -1349,6 +1355,21 @@ async function renderAkunList() {
         .join("")}
     </div>
   `;
+}
+
+function toggleFormAkun(paksaBuka) {
+  const form = document.getElementById("formTambahAkun");
+  const btn = document.getElementById("btnBukaFormAkun");
+  const buka = paksaBuka !== undefined ? paksaBuka : form.style.display === "none";
+  form.style.display = buka ? "block" : "none";
+  btn.textContent = buka ? "Tutup Form" : "+ Tambah Admin";
+  if (buka) {
+    document.getElementById("inputNamaAkun").value = "";
+    document.getElementById("inputEmailAkun").value = "";
+    document.getElementById("inputPasswordAkun").value = "";
+    document.getElementById("pesanAkun").textContent = "";
+    document.getElementById("inputNamaAkun").focus();
+  }
 }
 
 async function tambahAkun() {

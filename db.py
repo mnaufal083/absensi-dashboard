@@ -67,9 +67,34 @@ def login(email: str, password: str):
     """Login pakai Supabase Auth. Mengembalikan (user_dict, access_token, error)
     - user_dict berisi id/email/nama/role kalau berhasil, atau (None, None,
     pesan_error) kalau gagal (password salah ATAU akun dinonaktifkan Master
-    Admin)."""
+    Admin).
+
+    PERBAIKAN PENTING (27 Jul 2026): dulu fungsi ini memakai objek `supabase`
+    GLOBAL yang sama dipakai semua fungsi lain di file ini (termasuk
+    auth.admin.create_user untuk fitur "Tambah Admin"). Masalahnya,
+    supabase-py OTOMATIS menukar token otorisasi klien dari service_role
+    jadi token sesi milik user yang baru login, begitu sign_in_with_password()
+    dipanggil - ini perilaku bawaan library (GoTrue), bukan bug di kode kita.
+    Akibatnya: begitu ADA SAJA yang login lewat aplikasi ini, objek
+    `supabase` global jadi "tercemar" - kehilangan hak service_role - dan
+    semua panggilan admin SETELAHNYA (bikin akun, dst) ditolak dengan error
+    "User not allowed", walau kodenya sendiri benar dan SUPABASE_SERVICE_KEY
+    di .env juga sudah benar. Itu sebabnya kalau dites di proses Python baru
+    (belum pernah ada yang login), semua terlihat berhasil - tapi begitu
+    dipakai di aplikasi asli (login dulu, baru buka halaman Akun), gagal.
+
+    Solusinya: verifikasi email/password di sini memakai client Supabase
+    TERPISAH & sekali-pakai (dibuang begitu fungsi ini selesai), supaya
+    client `supabase` global tidak pernah ikut "tercemar" oleh sesi user
+    biasa, dan tetap murni service_role untuk operasi admin di fungsi lain."""
+    client_login: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     try:
-        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        client_login.auth._http_client._transport = httpx.HTTPTransport(retries=2)
+    except AttributeError:
+        pass  # versi supabase-py tertentu punya struktur auth client sedikit berbeda; aman diabaikan
+
+    try:
+        res = client_login.auth.sign_in_with_password({"email": email, "password": password})
     except Exception:
         return None, None, "Email atau password salah"
     if not res.user:
