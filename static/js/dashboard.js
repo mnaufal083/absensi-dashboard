@@ -97,10 +97,63 @@ async function ambilDaftarBidang() {
   return daftarBidangCache;
 }
 
-function optionsKeterangan(list, terpilih) {
-  return list
-    .map((k) => `<option value="${k.label}" ${k.label === terpilih ? "selected" : ""}>${k.label}</option>`)
+// FITUR BARU (30 Jul 2026): ringkasan aktivitas per pegawai (Dinas Luar,
+// Tidak Absen Datang/Pulang, Izin, Sakit, Alpha, dll) ditampilkan sebagai
+// badge kecil langsung di header accordion Data Harian - supaya jelas
+// KENAPA jumlah "hari kerja" seorang pegawai tidak selalu sama dengan
+// (total hari kalender - hari Libur), tanpa perlu buka tab Ringkasan
+// Pegawai dulu atau menebak-nebak dari baris tanggal satu-satu (yang
+// kolom Keterangan hariannya kadang memang tidak diisi teks apa pun per
+// tanggal untuk kategori seperti Dinas Luar - info itu cuma ada di baris
+// statistik total pegawai, bukan di baris per tanggal).
+const KATEGORI_AKTIVITAS_RINGKASAN = [
+  { field: "dinas_luar", label: "Dinas Luar", warna: "#0891B2" },
+  { field: "tidak_absen_datang", label: "Tidak Absen Datang", warna: "#D97706" },
+  { field: "tidak_absen_pulang", label: "Tidak Absen Pulang", warna: "#D97706" },
+  { field: "izin", label: "Izin", warna: "#6B7280" },
+  { field: "sakit", label: "Sakit", warna: "#D97706" },
+  { field: "alpha", label: "Alpha", warna: "#DC2626" },
+  { field: "terlambat", label: "Terlambat", warna: "#2563EB" },
+  { field: "pulang_cepat", label: "Pulang Cepat", warna: "#2563EB" },
+  { field: "lepas_piket", label: "Lepas Piket", warna: "#6B7280" },
+  { field: "tugas_belajar", label: "Tugas Belajar", warna: "#6B7280" },
+  { field: "total_cuti", label: "Cuti", warna: "#7C3AED" },
+];
+
+function badgeAktivitasPegawai(ringkasanPegawai) {
+  if (!ringkasanPegawai) return "";
+  const badges = KATEGORI_AKTIVITAS_RINGKASAN.filter((k) => (ringkasanPegawai[k.field] || 0) > 0)
+    .map(
+      (k) =>
+        `<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:${k.warna}1F;color:${k.warna};margin:2px 6px 2px 0">${k.label} · ${ringkasanPegawai[k.field]} hari</span>`
+    )
     .join("");
+  if (!badges) return "";
+  return `<div style="padding:0 16px 10px 34px;display:flex;flex-wrap:wrap">${badges}</div>`;
+}
+
+function optionsKeterangan(list, terpilih) {
+  // PERBAIKAN (30 Jul 2026): dulu kalau nilai keterangan baris ini KOSONG
+  // atau tidak cocok dengan opsi mana pun di Daftar Keterangan (mis. hari
+  // Dinas Luar yang di PDF sumber kolom Keterangan hariannya memang tidak
+  // diisi teks apa pun per tanggal - informasi itu cuma ada di baris
+  // statistik total), tidak ada <option> yang ditandai `selected`, dan
+  // BROWSER otomatis menampilkan opsi PERTAMA dalam daftar apa adanya
+  // (kebetulan "Hadir") - sehingga hari yang sebenarnya kosong/tidak jelas
+  // terlihat SEOLAH tercatat "Hadir", padahal datanya tidak menyatakan itu.
+  // Sekarang: kalau nilainya tidak cocok dengan opsi mana pun, tambahkan
+  // opsi eksplisit untuk nilai asli itu (atau "(kosong)" kalau memang
+  // benar-benar kosong) dan tandai itu yang `selected` - supaya keadaan
+  // sebenarnya selalu terlihat jelas, tidak pernah diam-diam "jatuh" ke
+  // kategori lain.
+  const cocok = list.some((k) => k.label === terpilih);
+  const opsiAsli = !cocok
+    ? `<option value="${terpilih || ""}" selected>${terpilih ? terpilih : "(kosong - tidak tercatat di PDF)"}</option>`
+    : "";
+  return (
+    opsiAsli +
+    list.map((k) => `<option value="${k.label}" ${k.label === terpilih ? "selected" : ""}>${k.label}</option>`).join("")
+  );
 }
 
 // ---------------------------------------------------------------------
@@ -532,7 +585,20 @@ function renderDetailBatch(detail, keterangan, daftarBidang) {
     <div id="sub-log" style="display:none"></div>
   `;
 
-  renderTabelHarian(detail.attendance, keterangan, isFinal);
+  // PERBAIKAN (30 Jul 2026): dulu label jumlah hari di accordion Data Harian
+  // (renderTabelHarian) menghitung SEMUA baris attendance_records per
+  // pegawai (termasuk hari Libur), jadi menampilkan jumlah HARI KALENDER
+  // dalam periode batch (mis. "28 hari") - bukan jumlah HARI KERJA
+  // sesungguhnya, sehingga tidak sinkron dengan angka "Total Hari Kerja"
+  // di tab Ringkasan Pegawai maupun di Excel yang diunduh (mis. "18 hari").
+  // Sekarang label itu memakai ringkasan_pegawai.total_hari_kerja (field
+  // yang sama dipakai Excel), dicocokkan lewat NIP.
+  const ringkasanByNip = new Map();
+  (detail.ringkasan || []).forEach((r) => {
+    if (r.nip) ringkasanByNip.set(r.nip, r);
+  });
+
+  renderTabelHarian(detail.attendance, keterangan, isFinal, ringkasanByNip);
   renderTabelRingkasan(detail.ringkasan, isFinal, daftarBidang);
   renderLogBerkasBatch(detail.berkas_bermasalah);
 
@@ -554,7 +620,7 @@ function renderDetailBatch(detail, keterangan, daftarBidang) {
   });
 }
 
-function renderTabelHarian(rows, keterangan, isFinal) {
+function renderTabelHarian(rows, keterangan, isFinal, ringkasanByNip) {
   const wrap = document.getElementById("sub-harian");
   if (!rows.length) {
     wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Tidak ada data harian.</p>`;
@@ -582,6 +648,13 @@ function renderTabelHarian(rows, keterangan, isFinal) {
     .map((g, gi) => {
       const jumlahEdit = g.baris.filter((r) => r.is_edited).length;
       const kataKunci = `${g.nama} ${g.nip}`.toLowerCase();
+      // total_hari_kerja dari ringkasan_pegawai (excl. Libur) kalau ada -
+      // konsisten dengan Excel; fallback ke hitungan baris mentah (termasuk
+      // Libur) hanya kalau NIP tidak ketemu di ringkasan (mis. NIP "-").
+      const ringkasanPegawai = ringkasanByNip && g.nip ? ringkasanByNip.get(g.nip) : null;
+      const labelHari = ringkasanPegawai && typeof ringkasanPegawai.total_hari_kerja === "number"
+        ? `${ringkasanPegawai.total_hari_kerja} hari kerja`
+        : `${g.baris.length} hari tercatat`;
       return `
       <div data-grup-pegawai="${kataKunci}" style="border:0.5px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;background:var(--kartu-bg)">
         <button type="button" class="grup-toggle" data-grup-index="${gi}"
@@ -590,8 +663,9 @@ function renderTabelHarian(rows, keterangan, isFinal) {
             <span class="grup-panah" style="display:inline-block;transition:transform .15s;margin-right:8px">▸</span>
             ${g.nama} <span style="font-weight:400;color:var(--teks-sekunder)">· NIP ${g.nip || "-"}</span>
           </span>
-          <span style="font-size:12px;color:var(--teks-muted)">${g.baris.length} hari${jumlahEdit ? ` · ${jumlahEdit} diedit` : ""}</span>
+          <span style="font-size:12px;color:var(--teks-muted)">${labelHari}${jumlahEdit ? ` · ${jumlahEdit} diedit` : ""}</span>
         </button>
+        ${badgeAktivitasPegawai(ringkasanPegawai)}
         <div class="grup-isi" id="grup-isi-${gi}" style="border-top:0.5px solid var(--border)"></div>
       </div>`;
     })

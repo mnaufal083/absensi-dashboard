@@ -90,8 +90,27 @@ def tulis_sheet_rekap_resmi(workbook, ringkasan_list, periode_awal=None, periode
     nama_bidang = (nama_bidang or "").strip()
 
     periode_awal_fmt, periode_akhir_fmt = _format_periode(periode_awal, periode_akhir)
+
+    # PERBAIKAN (29 Jul 2026): dulu dipakai max() dari "Total Hari Kerja"
+    # seluruh pegawai di batch ini - masalahnya, SATU pegawai saja yang
+    # datanya tidak biasa (periode berbeda dari mayoritas, atau ada
+    # anomali ekstraksi) akan membuat angka yang salah itu "menang" dan
+    # ditampilkan sebagai Jumlah Hari Kerja untuk SELURUH batch, padahal
+    # mayoritas pegawai lain punya angka yang sama & benar. Sekarang dipakai
+    # MODUS (nilai yang paling sering muncul) - jauh lebih tahan terhadap
+    # 1-2 pegawai outlier, karena pegawai dalam satu periode absensi yang
+    # sama normalnya memang punya Jumlah Hari Kerja yang identik.
     jumlah_hari_kerja_list = [r.get("Total Hari Kerja") for r in ringkasan_list if isinstance(r.get("Total Hari Kerja"), int)]
-    jumlah_hari_kerja = max(jumlah_hari_kerja_list) if jumlah_hari_kerja_list else "-"
+    if jumlah_hari_kerja_list:
+        frekuensi = {}
+        for v in jumlah_hari_kerja_list:
+            frekuensi[v] = frekuensi.get(v, 0) + 1
+        # kalau ada seri (>1 nilai muncul dengan frekuensi sama-sama tertinggi),
+        # pilih yang terkecil - opsi paling aman/konservatif dibanding terbesar.
+        frekuensi_maks = max(frekuensi.values())
+        jumlah_hari_kerja = min(v for v, jml in frekuensi.items() if jml == frekuensi_maks)
+    else:
+        jumlah_hari_kerja = "-"
 
     nama_sheet = nama_bidang.title()[:31] if nama_bidang else NAMA_SHEET
     if nama_sheet in workbook.sheetnames:
