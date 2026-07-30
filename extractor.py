@@ -47,7 +47,7 @@ Mengembalikan: (rows, ringkasan, error)
 import re
 import hashlib
 import pdfplumber
-from datetime import datetime
+from datetime import datetime, timedelta
 
 TANGGAL_REGEX = re.compile(r"^\d{1,2}-[A-Za-z]{3}-\d{4}$")
 NIP_REGEX = re.compile(r"^\d{18}$")
@@ -87,10 +87,19 @@ def _cari_indeks_nip(bagian_depan):
     return -1
 
 
+TOLERANSI_TELAT_MENIT = 30  # arahan pembimbing (30 Jul 2026): telat baru
+# dihitung kalau Jam Masuk MELEWATI (Jadwal Masuk + toleransi ini) - bukan
+# langsung dari Jadwal Masuk aslinya. Mis. Jadwal Masuk 07:30 + toleransi
+# 30 menit = batas 08:00: jam masuk s.d. 08:00 masih dianggap aman/tidak
+# telat, baru mulai 08:01 dst dihitung telat (dan durasi telatnya dihitung
+# dari batas 08:00 itu, BUKAN dari 07:30).
+
+
 def _hitung_telat(jadwal_masuk, jam_masuk):
-    """Bandingkan Jam Masuk aktual terhadap Jadwal Masuk. Kembalikan durasi
-    keterlambatan format 'HH:MM', atau '-' kalau tidak terlambat / data
-    tidak lengkap (mis. hari libur, cuti, tidak ada catatan jam masuk)."""
+    """Bandingkan Jam Masuk aktual terhadap (Jadwal Masuk + toleransi 30
+    menit). Kembalikan durasi keterlambatan format 'HH:MM' terhitung dari
+    batas toleransi itu, atau '-' kalau tidak terlambat / data tidak
+    lengkap (mis. hari libur, cuti, tidak ada catatan jam masuk)."""
     if jam_masuk in ("", "-") or jadwal_masuk in ("", "-", "00:00"):
         return "-"
     try:
@@ -98,9 +107,10 @@ def _hitung_telat(jadwal_masuk, jam_masuk):
         t_masuk = datetime.strptime(jam_masuk, "%H:%M")
     except ValueError:
         return "-"
-    if t_masuk <= t_jadwal:
+    batas_toleransi = t_jadwal + timedelta(minutes=TOLERANSI_TELAT_MENIT)
+    if t_masuk <= batas_toleransi:
         return "-"
-    selisih_menit = int((t_masuk - t_jadwal).total_seconds() // 60)
+    selisih_menit = int((t_masuk - batas_toleransi).total_seconds() // 60)
     return f"{selisih_menit // 60:02d}:{selisih_menit % 60:02d}"
 
 
@@ -247,6 +257,30 @@ def ekstrak_pdf(path_pdf, nama_file):
 
                         if not keterangan and jadwal_masuk == "00:00" and jadwal_pulang == "00:00":
                             keterangan = "Libur"
+                        elif not keterangan and jam_masuk in ("", "-") and jam_keluar in ("", "-"):
+                            # PERBAIKAN (30 Jul 2026): dulu kalau kolom Keterangan
+                            # PDF kosong untuk hari kerja biasa (bukan Libur) DAN
+                            # sama sekali tidak ada jam masuk maupun jam keluar
+                            # tercatat, nilainya dibiarkan "" - lalu di dashboard
+                            # malah tampil ambigu/salah (sempat "Hadir" karena bug
+                            # dropdown, sekarang jadi placeholder "(kosong)").
+                            # Padahal hari kerja tanpa catatan jam SAMA SEKALI dan
+                            # tanpa keterangan apa pun di PDF-nya sendiri, sesuai
+                            # konvensi kepegawaian, berarti "Alpha" (tidak hadir
+                            # tanpa keterangan) - jadi diisi otomatis sebagai
+                            # default, bukan dibiarkan kosong.
+                            #
+                            # SENGAJA tidak menyentuh hari yang cuma SEBAGIAN
+                            # datanya hilang (mis. ada jam masuk tapi jam keluar
+                            # kosong = "Tidak Absen Pulang") - itu bukan Alpha,
+                            # pegawainya tetap hadir hari itu.
+                            #
+                            # CATATAN: kalau ternyata hari kosong ini sebenarnya
+                            # Dinas Luar/Izin/Sakit/Cuti (bukan benar-benar Alpha),
+                            # tetap bisa dikoreksi manual lewat dropdown Keterangan
+                            # seperti biasa - default ini cuma tebakan paling masuk
+                            # akal kalau PDF-nya sendiri tidak memberi info apa pun.
+                            keterangan = "Alpha"
 
                         rows.append({
                             "Nama": cur["nama"] or "-",

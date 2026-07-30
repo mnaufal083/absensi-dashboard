@@ -692,15 +692,24 @@ function renderTabelHarian(rows, keterangan, isFinal, ringkasanByNip) {
             <span>TANGGAL</span><span>JAM MASUK</span><span>JAM KELUAR</span><span>KETERANGAN</span><span>TELAT</span>
           </div>
           ${g.baris
-            .map(
-              (r) => `<div class="tabel-baris ${r.is_edited ? "diedit" : ""}" style="grid-template-columns:0.8fr 1fr 1fr 1.3fr 1fr" data-record-id="${r.id}">
-              <span style="color:var(--teks-sekunder)">${formatTanggalTampil(r.tanggal)}</span>
+            .map((r) => {
+              // FITUR BARU (30 Jul 2026): tanggal Libur ditampilkan merah,
+              // meniru warna merah pada tanggal Libur di PDF sumber - supaya
+              // langsung terlihat sekilas tanpa perlu baca kolom Keterangan.
+              const isLibur = r.keterangan === "Libur";
+              const warnaTanggal = isLibur ? "color:var(--merah-teks);font-weight:600" : "color:var(--teks-sekunder)";
+              // Telat (datang_telat) diwarnai merah kalau ada nilainya (bukan
+              // "-"/kosong) - menandai keterlambatan supaya menonjol.
+              const adaTelat = r.datang_telat && r.datang_telat !== "-";
+              const gayaTelat = adaTelat ? "color:var(--merah-teks);font-weight:600" : "";
+              return `<div class="tabel-baris ${r.is_edited ? "diedit" : ""}" style="grid-template-columns:0.8fr 1fr 1fr 1.3fr 1fr" data-record-id="${r.id}">
+              <span style="${warnaTanggal}">${formatTanggalTampil(r.tanggal)}</span>
               <input class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="jam_masuk" value="${r.jam_masuk || ""}" />
               <input class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="jam_keluar" value="${r.jam_keluar || ""}" />
               <select class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="keterangan">${optionsKeterangan(keterangan, r.keterangan)}</select>
-              <input class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="datang_telat" value="${r.datang_telat || ""}" placeholder="-" />
-            </div>`
-            )
+              <input class="edit-field" ${dis} style="${gayaTelat}" data-tabel="attendance_records" data-record="${r.id}" data-field="datang_telat" value="${r.datang_telat || ""}" placeholder="-" />
+            </div>`;
+            })
             .join("")}
         `;
         if (!isFinal) pasangListenerEdit(isi);

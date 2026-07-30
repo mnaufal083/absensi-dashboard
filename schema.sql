@@ -104,9 +104,16 @@ create table if not exists keterangan_master (
     label    text not null unique,
     urutan   integer not null default 0
 );
+-- PERBAIKAN (30 Jul 2026): dulu ada "WFO" DAN "Hadir" sekaligus di daftar
+-- default - dua istilah untuk hal yang sama (pegawai hadir kerja), bikin
+-- pilihan dropdown ambigu/tidak konsisten antar pegawai/batch. Sekarang
+-- cukup "WFO" saja yang mewakili kehadiran; "Hadir" dihapus dari daftar
+-- default. (Kalau instalasi yang SUDAH ADA masih punya baris "Hadir" di
+-- keterangan_master beserta data attendance_records yang memakainya, lihat
+-- catatan migrasi di README_INTEGRASI.md bagian Troubleshooting.)
 insert into keterangan_master (label, urutan) values
     ('WFO', 0),
-    ('Hadir', 1), ('Sakit', 2), ('Izin', 3), ('Alpha', 4),
+    ('Sakit', 2), ('Izin', 3), ('Alpha', 4),
     ('Cuti Belajar', 5), ('Cuti Alasan Penting', 6), ('Cuti Besar', 7),
     ('Dinas Luar', 8), ('Lepas Piket', 9), ('Libur', 10), ('-', 11)
 on conflict (label) do nothing;
