@@ -427,15 +427,19 @@ def api_unduh(batch_id):
 def visualisasi():
     mode = request.args.get("filter_mode", "all")
     value = request.args.get("filter_value")
-    batch_id_untuk_perbandingan = value if mode == "batch" else None
     return jsonify({
         "statistik": db.statistik_ringkas(mode, value),
         "keterangan": db.agregasi_keterangan(mode, value),
-        "tren_keseluruhan": db.tren_bulanan("all", None),  # baseline, tidak ikut filter
-        "tren_filter": db.tren_bulanan(mode, value),
+        # PERBAIKAN (30 Jul 2026): dulu selalu "all" (tidak ikut filter,
+        # jadi acuan pembanding tetap). Sekarang Filter Bidang sudah
+        # dihapus dari halaman ini dan cuma tersisa Filter Batch - jadi
+        # Tren Bulanan ikut mengikuti batch yang dipilih juga.
+        "tren": db.tren_bulanan(mode, value),
         "ranking_alpha": db.ranking_pegawai("alpha", mode, value, limit=10),
-        "ranking_terlambat": db.ranking_pegawai("terlambat", mode, value, limit=10),
-        "perbandingan_bidang": db.perbandingan_bidang(batch_id_untuk_perbandingan),
+        # PERBAIKAN (30 Jul 2026): tadinya 10, dinaikkan jadi 15 supaya
+        # grafik batang Rekapitulasi Keterlambatan bisa memuat lebih banyak
+        # pegawai sekaligus.
+        "ranking_terlambat": db.ranking_pegawai("terlambat", mode, value, limit=15),
     })
 
 
@@ -493,6 +497,16 @@ def api_bidang():
             db.tambah_bidang(label)
         return jsonify({"ok": True})
     return jsonify(db.daftar_bidang())
+
+
+@app.route("/api/pengaturan/<kunci>", methods=["GET", "PUT"])
+@login_required
+def api_pengaturan(kunci):
+    if request.method == "PUT":
+        nilai = request.get_json(force=True).get("nilai", "")
+        db.set_pengaturan(kunci, nilai)
+        return jsonify({"ok": True})
+    return jsonify({"kunci": kunci, "nilai": db.ambil_pengaturan(kunci)})
 
 
 @app.route("/api/bidang/<int:bidang_id>", methods=["DELETE"])

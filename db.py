@@ -541,6 +541,18 @@ def ranking_pegawai(field, mode="all", value=None, limit=5):
     return [x for x in urut if x["jumlah"] > 0][:limit]
 
 
+def ambil_pengaturan(kunci, default=None):
+    """Ambil satu nilai pengaturan umum (key-value), mis. referensi jumlah
+    pegawai riil kantor. Kembalikan `default` kalau kuncinya belum pernah
+    diisi."""
+    baris = supabase.table("pengaturan").select("nilai").eq("kunci", kunci).limit(1).execute().data
+    return baris[0]["nilai"] if baris else default
+
+
+def set_pengaturan(kunci, nilai):
+    supabase.table("pengaturan").upsert({"kunci": kunci, "nilai": str(nilai)}).execute()
+
+
 def daftar_bidang():
     return supabase.table("bidang_master").select("*").order("urutan").execute().data
 
@@ -556,29 +568,70 @@ def hapus_bidang(bidang_id):
 
 
 def perbandingan_bidang(batch_id=None):
-    """Rekap Total Pegawai/Telat/Alpha per Bidang tetap, dipakai untuk grafik
-    batang perbandingan di Visualisasi. Kalau batch_id diisi, dibatasi ke
-    satu batch itu saja; kalau tidak, dijumlah dari semua batch.
+    """Rekap Total Pegawai/Telat/Alpha per Bidang, dipakai untuk grafik
+    batang perbandingan di Visualisasi.
 
-    PERBAIKAN (25 Jul 2026): daftar Bidang dulu hardcode langsung di sini
-    (dan terpisah lagi di dashboard.js - dua sumber yang harus disinkron
-    manual, pernah bikin "DATUN" ketinggalan di salah satu file). Sekarang
-    diambil dari bidang_master (dikelola dari halaman Pengaturan), satu
-    sumber data yang sama dipakai backend maupun frontend."""
-    hasil = []
-    for b in daftar_bidang():
+    - Telat/Alpha: dijumlah dari SEMUA baris ringkasan_pegawai yang cocok
+      (batch_id kalau diisi, atau semua batch kalau tidak) - ini kejadian
+      per-periode, sah dijumlah lintas waktu seperti sebelumnya.
+
+    - Total Pegawai: PERBAIKAN (30 Jul 2026) - dulu dihitung dari JUMLAH
+      BARIS ringkasan_pegawai (len(rows)). Masalahnya, satu pegawai punya
+      SATU baris PER BATCH (mis. per bulan) dia diproses - jadi kalau
+      tidak dibatasi ke satu batch, pegawai yang sudah diproses di 12
+      batch bulanan akan ikut menambah Total Pegawai sebanyak 12 kali.
+      Lebih parah lagi kalau pegawai itu sempat MUTASI pindah Bidang: dia
+      bisa ikut menambah Total Pegawai di LEBIH DARI SATU Bidang sekaligus
+      secara tidak sengaja. Sekarang Total Pegawai dihitung dari HEADCOUNT
+      UNIK per NIP, diambil dari BATCH TERBARU (periode_akhir paling akhir)
+      tiap pegawai - merepresentasikan susunan organisasi SAAT INI, bukan
+      akumulasi sepanjang sejarah. Kalau batch_id diisi (mode satu batch),
+      headcount otomatis = jumlah NIP unik di batch itu saja.
+    """
+    daftar = daftar_bidang()
+    # Pencocokan nama Bidang tetap case-insensitive, konsisten dengan ilike()
+    # yang dipakai query Telat/Alpha di bawah.
+    label_ci = {b["label"].strip().lower(): b["label"] for b in daftar}
+
+    hasil = {}
+    for b in daftar:
         nama_bidang = b["label"]
         q = supabase.table("ringkasan_pegawai").select("terlambat,alpha").ilike("bidang", nama_bidang)
         if batch_id:
             q = q.eq("batch_id", batch_id)
         rows = _ambil_semua(q)
-        hasil.append({
+        hasil[nama_bidang] = {
             "bidang": nama_bidang,
-            "total_pegawai": len(rows),
+            "total_pegawai": 0,
             "telat": sum(r.get("terlambat") or 0 for r in rows),
             "alpha": sum(r.get("alpha") or 0 for r in rows),
-        })
-    return hasil
+        }
+
+    # --- Total Pegawai: headcount unik per NIP ---
+    if batch_id:
+        rows_pegawai = _ambil_semua(supabase.table("ringkasan_pegawai").select("nip,bidang").eq("batch_id", batch_id))
+        terbaru_per_nip = {r["nip"]: r for r in rows_pegawai if r.get("nip")}
+    else:
+        rows_pegawai = _ambil_semua(
+            supabase.table("ringkasan_pegawai").select("nip,bidang,batches(periode_akhir,dibuat_pada)")
+        )
+        terbaru_per_nip = {}
+        for r in rows_pegawai:
+            nip = r.get("nip")
+            if not nip:
+                continue
+            info_batch = r.get("batches") or {}
+            kunci_waktu = info_batch.get("periode_akhir") or info_batch.get("dibuat_pada") or ""
+            terdahulu = terbaru_per_nip.get(nip)
+            if not terdahulu or kunci_waktu > terdahulu["_kunci_waktu"]:
+                terbaru_per_nip[nip] = {"bidang": r.get("bidang"), "_kunci_waktu": kunci_waktu}
+
+    for info in terbaru_per_nip.values():
+        nama_bidang = label_ci.get((info.get("bidang") or "").strip().lower())
+        if nama_bidang:
+            hasil[nama_bidang]["total_pegawai"] += 1
+
+    return [hasil[b["label"]] for b in daftar]
 
 
 def cari_pegawai(kata_kunci):

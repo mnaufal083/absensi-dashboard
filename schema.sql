@@ -209,6 +209,23 @@ create table if not exists batch_pegawai_signature (
 );
 create index if not exists idx_pegawaisig_batch on batch_pegawai_signature(batch_id, nip, signature);
 
+-- ----------------------------------------------------------------------------
+-- 9. PENGATURAN — pasangan kunci/nilai untuk konfigurasi umum aplikasi.
+--    Baru dipakai untuk 1 hal saat ini: referensi "jumlah pegawai riil"
+--    kantor (mis. 380), ditampilkan di kartu Total Pegawai pada halaman
+--    Visualisasi. Ini SENGAJA dipisah dari angka "Total Data Pegawai
+--    Terekap" yang dihitung otomatis - karena hitungan otomatis itu bisa
+--    lebih besar dari jumlah pegawai sesungguhnya kalau mode "Seluruh
+--    Batch (akumulasi)" dipilih (satu pegawai bisa punya baris di banyak
+--    batch/bulan). Angka referensi ini murni diisi manual oleh admin,
+--    bukan dihitung dari data attendance.
+-- ----------------------------------------------------------------------------
+create table if not exists pengaturan (
+    kunci           text primary key,
+    nilai           text,
+    diperbarui_pada timestamptz not null default now()
+);
+
 -- ============================================================================
 -- ROW LEVEL SECURITY
 -- Karena hanya 3 admin internal yang setara haknya, kebijakan dibuat sederhana:
@@ -224,6 +241,7 @@ alter table admin_profiles enable row level security;
 alter table record_edit_log enable row level security;
 alter table batch_file_hashes enable row level security;
 alter table batch_pegawai_signature enable row level security;
+alter table pengaturan enable row level security;
 
 create policy "authenticated_full_access" on batches
     for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
@@ -244,6 +262,8 @@ create policy "authenticated_full_access" on record_edit_log
 create policy "authenticated_full_access" on batch_file_hashes
     for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "authenticated_full_access" on batch_pegawai_signature
+    for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "authenticated_full_access" on pengaturan
     for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Catatan: backend Flask memakai SERVICE ROLE KEY (lihat README_INTEGRASI.md),

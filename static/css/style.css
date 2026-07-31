@@ -224,28 +224,104 @@ button:active { transform: scale(0.97); }
 
 .loading-text { color: var(--teks-muted); font-size: 13px; }
 
+/* ---------------------------------------------------------------------
+   HALAMAN LOGIN
+   FITUR BARU (31 Jul 2026): tampilan lama terlalu polos/kaku (kartu putih
+   datar di atas background abu solid, tanpa interaksi apa pun selain
+   hover tombol bawaan browser). Sekarang: gradient lembut + 2 "blob"
+   dekoratif yang melayang pelan di latar belakang (murni CSS, di-blur
+   besar supaya tidak mengganggu keterbacaan), kartu masuk dengan animasi
+   fade+slide, input & tombol punya micro-interaction (focus glow, hover
+   lift), dan tetap menghormati preferensi "reduce motion" pengguna.
+--------------------------------------------------------------------- */
 .login-body {
+  position: relative;
   display: flex; align-items: center; justify-content: center; min-height: 100vh;
-  background: var(--abu-bg);
+  background: linear-gradient(135deg, #EFF6FF 0%, #F8FAFC 45%, #F5F3FF 100%);
+  overflow: hidden;
+  padding: 20px;
 }
+html[data-tema="gelap"] .login-body {
+  background: linear-gradient(135deg, #0B1220 0%, #131B2E 50%, #1A1330 100%);
+}
+.login-body::before, .login-body::after {
+  content: ""; position: absolute; border-radius: 50%; filter: blur(70px);
+  opacity: .55; z-index: 0; pointer-events: none;
+  animation: blobMengambang 11s ease-in-out infinite;
+}
+.login-body::before {
+  width: 340px; height: 340px; top: -90px; left: -90px;
+  background: linear-gradient(135deg, #93C5FD, #C4B5FD);
+}
+.login-body::after {
+  width: 380px; height: 380px; bottom: -110px; right: -110px;
+  background: linear-gradient(135deg, #FBCFE8, #BFDBFE);
+  animation-delay: -5.5s;
+}
+html[data-tema="gelap"] .login-body::before { background: linear-gradient(135deg, #1D4ED8, #6D28D9); opacity: .3; }
+html[data-tema="gelap"] .login-body::after { background: linear-gradient(135deg, #7C3AED, #1E3A8A); opacity: .25; }
+@keyframes blobMengambang {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(22px, 26px) scale(1.07); }
+}
+
 .login-card {
-  background: var(--kartu-bg); border-radius: 14px; padding: 2.25rem 2rem; width: 340px;
-  text-align: center; border: 1px solid var(--border); box-shadow: 0 4px 16px rgba(15,23,42,.06);
+  position: relative; z-index: 1;
+  background: var(--kartu-bg); border-radius: 18px; padding: 2.35rem 2.1rem; width: 360px;
+  max-width: 100%;
+  text-align: center; border: 1px solid var(--border);
+  box-shadow: 0 20px 45px -14px rgba(37,99,235,.20), 0 4px 18px rgba(15,23,42,.06);
+  animation: masukLoginCard .55s cubic-bezier(.2,.8,.2,1);
 }
+@keyframes masukLoginCard {
+  from { opacity: 0; transform: translateY(18px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 .login-badge {
-  width: 64px; height: 64px; border-radius: 12px; margin: 0 auto 14px;
-  background: transparent; color: var(--biru); overflow: hidden;
+  width: 68px; height: 68px; border-radius: 16px; margin: 0 auto 14px;
+  background: linear-gradient(135deg, var(--biru-muda-bg), #F5F3FF);
+  color: var(--biru); overflow: hidden;
   display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 6px rgba(37,99,235,.07);
+  transition: transform .25s ease, box-shadow .25s ease;
 }
+.login-card:hover .login-badge { transform: scale(1.05) rotate(-2deg); box-shadow: 0 0 0 8px rgba(37,99,235,.1); }
+html[data-tema="gelap"] .login-badge { background: linear-gradient(135deg, var(--biru-muda-bg), #241B3F); }
+
 .login-eyebrow { font-size: 10px; letter-spacing: .6px; color: var(--biru); background: var(--biru-muda-bg); border-radius: 999px; padding: 4px 10px; display: inline-block; margin-bottom: 12px; font-weight: 700; text-transform: uppercase; }
-.login-title { font-size: 18px; margin: 0 0 20px; color: var(--teks-utama); }
+.login-title { font-size: 19px; margin: 0 0 22px; color: var(--teks-utama); font-weight: 700; }
 .login-form { display: flex; flex-direction: column; gap: 4px; text-align: left; }
-.login-form label { font-size: 12px; color: var(--teks-sekunder); font-weight: 600; margin-top: 8px; }
-.login-form input { width: 100%; margin-top: 4px; }
-.login-form button { margin-top: 18px; background: var(--biru); color: #fff; }
-.login-form button:hover { background: var(--biru-hover); }
-.login-error { background: var(--merah-bg); color: var(--merah-teks); border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 12px; }
-.login-note { font-size: 11.5px; color: var(--teks-muted); margin-top: 16px; }
+.login-form label { font-size: 12px; color: var(--teks-sekunder); font-weight: 600; margin-top: 9px; }
+.login-form input {
+  width: 100%; margin-top: 5px; padding: 10px 12px; font-size: 13.5px;
+  border-radius: 9px; border: 1.5px solid var(--border); background: var(--abu-bg); color: var(--teks-utama);
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+.login-form input:hover { border-color: var(--border-kuat); }
+.login-form input:focus {
+  outline: none; border-color: var(--biru); background: var(--kartu-bg);
+  box-shadow: 0 0 0 4px rgba(37,99,235,.13);
+}
+.login-form button {
+  margin-top: 20px; padding: 11px; border-radius: 9px; border: none;
+  background: linear-gradient(135deg, var(--biru), var(--biru-tua)); color: #fff;
+  font-weight: 700; font-size: 14px; cursor: pointer;
+  box-shadow: 0 10px 22px -10px rgba(37,99,235,.55);
+  transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+.login-form button:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 12px 26px -10px rgba(37,99,235,.65); }
+.login-form button:active { transform: translateY(0) scale(.98); }
+.login-error { background: var(--merah-bg); color: var(--merah-teks); border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 12px; animation: goyangLoginError .4s ease; }
+@keyframes goyangLoginError { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.login-note { font-size: 11.5px; color: var(--teks-muted); margin-top: 18px; }
+
+@media (max-width: 420px) {
+  .login-card { padding: 2rem 1.35rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-body::before, .login-body::after, .login-card, .login-error { animation: none; }
+}
 
 .kartu {
   background: var(--kartu-bg); border-radius: 10px; padding: 0.9rem 1.1rem;

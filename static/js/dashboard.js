@@ -934,10 +934,31 @@ async function togglePegawai(kartu) {
 // ---------------------------------------------------------------------
 // VISUALISASI (ringkas, dihitung dari daftar batch yang sudah dimuat)
 // ---------------------------------------------------------------------
-const PALET_KETERANGAN = ["#2563EB", "#94A3B8", "#F59E0B", "#0D9488", "#8B5CF6", "#DC2626", "#38BDF8"];
+// FITUR BARU (30 Jul 2026): dulu kategori & urutan donut chart mengikuti
+// APA SAJA yang kebetulan muncul di data (Object.entries hasil query),
+// jadi urutan & warnanya bisa berubah-ubah antar batch, dan kategori yang
+// kebetulan 0 kejadian tidak muncul sama sekali. Sekarang dipetakan tetap
+// 1:1 ke daftar Keterangan master (yang sama dipakai dropdown di Data
+// Harian) - selalu 10 baris dengan urutan & warna yang konsisten, termasuk
+// yang 0 kejadian, supaya gampang dibandingkan antar batch. Opsi "-"
+// (placeholder teknis) sengaja tidak ikut ditampilkan di sini.
+const WARNA_KETERANGAN = {
+  "WFO": "#2563EB",
+  "Libur": "#94A3B8",
+  "Izin": "#EAB308",
+  "Dinas Luar": "#0D9488",
+  "Alpha": "#DC2626",
+  "Sakit": "#F97316",
+  "Cuti": "#6D28D9",
+  "Cuti Alasan Penting": "#8B5CF6",
+  "Cuti Besar": "#A855F7",
+  "Cuti Belajar": "#C084FC",
+  "Lepas Piket": "#38BDF8",
+};
+const WARNA_LAINNYA = "#CBD5E1"; // fallback untuk label tak dikenal (mis. data lama)
 
 async function renderVisualisasi() {
-  const [batches, daftarBidang] = await Promise.all([api("/api/batches"), ambilDaftarBidang()]);
+  const [batches, jumlahRiil] = await Promise.all([api("/api/batches"), api("/api/pengaturan/jumlah_pegawai_riil")]);
 
   content.innerHTML = `
     <p style="font-size:16px;font-weight:700;margin:0 0 14px" class="judul-serif">${ICONS.chart} Visualisasi</p>
@@ -952,131 +973,85 @@ async function renderVisualisasi() {
             ${batches.map((b) => `<option value="${b.id}">${b.label} · ${b.nama_bidang || "campuran"}</option>`).join("")}
           </select>
         </div>
-        <div>
-          <label>Pilih Bidang</label>
-          <select id="filterBidang">
-            <option value="all">Semua Bidang (gabungan)</option>
-            ${daftarBidang.map((b) => `<option value="${b.label}">${b.label}</option>`).join("")}
-          </select>
-        </div>
       </div>
       <div class="konteks-banner" id="konteksBanner"></div>
     </div>
 
-    <div class="grid-4" style="margin-bottom:14px">
-      <div class="kartu"><p class="stat-label">${ICONS.users} Total Pegawai</p><p class="stat-angka" id="statTotal">-</p></div>
-      <div class="kartu"><p class="stat-label">${ICONS.clock} Telat (hari)</p><p class="stat-angka" style="color:#2563EB" id="statTelat">-</p></div>
-      <div class="kartu"><p class="stat-label">Sakit (hari)</p><p class="stat-angka" style="color:#D97706" id="statSakit">-</p></div>
-      <div class="kartu"><p class="stat-label">${ICONS.x} Alpha (hari)</p><p class="stat-angka" style="color:var(--merah-teks)" id="statAlpha">-</p></div>
-    </div>
-
-    <div class="kartu">
-      <p class="stat-label" style="font-weight:600;margin-bottom:12px">${ICONS.pie} Komposisi Keterangan <span id="labelDonut" style="font-weight:400;color:var(--teks-muted)"></span></p>
-      <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
-        <div id="donutChart"></div>
-        <div id="donutLegend" style="flex:1;min-width:180px"></div>
+    <div class="grid-2" style="margin-bottom:14px;align-items:stretch">
+      <div class="kartu">
+        <p class="stat-label" style="font-weight:600;margin-bottom:12px">${ICONS.pie} Komposisi Keterangan <span id="labelDonut" style="font-weight:400;color:var(--teks-muted)"></span></p>
+        <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+          <div id="donutChart"></div>
+          <div id="donutLegend" style="flex:1;min-width:220px"></div>
+        </div>
+      </div>
+      <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:12px">
+        <div class="kartu">
+          <p class="stat-label">${ICONS.users} Total Data Pegawai Terekap</p>
+          <p class="stat-angka" id="statTotal">-</p>
+          <p style="font-size:11px;color:var(--teks-muted);margin:2px 0 0">
+            dari ≈ <span id="statJumlahRiil">${jumlahRiil.nilai || "?"}</span> pegawai riil
+            <button type="button" id="btnEditJumlahRiil" title="Ubah angka referensi" style="border:none;background:none;color:var(--biru);cursor:pointer;font-size:11px;padding:0 0 0 4px">✎ ubah</button>
+          </p>
+        </div>
+        <div class="kartu"><p class="stat-label">${ICONS.clock} Telat (hari)</p><p class="stat-angka" style="color:#2563EB" id="statTelat">-</p></div>
+        <div class="kartu"><p class="stat-label">Sakit (hari)</p><p class="stat-angka" style="color:#D97706" id="statSakit">-</p></div>
+        <div class="kartu"><p class="stat-label">${ICONS.x} Alpha (hari)</p><p class="stat-angka" style="color:var(--merah-teks)" id="statAlpha">-</p></div>
       </div>
     </div>
 
     <div class="grid-2">
       <div class="kartu">
-        <p class="stat-label" style="font-weight:600;margin-bottom:6px">${ICONS.chart} Tren — Seluruh Bidang</p>
+        <p class="stat-label" style="font-weight:600;margin-bottom:6px">${ICONS.chart} Tren Bulanan <span id="labelTren" style="font-weight:400;color:var(--teks-muted)"></span></p>
         <div style="display:flex;gap:10px;font-size:11px;color:var(--teks-sekunder);margin-bottom:4px">
           <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#DC2626;margin-right:3px"></span>Alpha</span>
           <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#D97706;margin-right:3px"></span>Sakit</span>
           <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2563EB;margin-right:3px"></span>Terlambat</span>
         </div>
-        <div id="trenSeluruh"></div>
-        <p style="font-size:10.5px;color:var(--teks-muted);margin:6px 0 0">Selalu menjumlahkan kelima Bidang, tidak ikut filter — acuan pembanding.</p>
-      </div>
-
-      <div class="kartu">
-        <p class="stat-label" style="font-weight:600;margin-bottom:6px">${ICONS.chart} Tren — <span id="labelTrenBidang">Per Bidang</span></p>
-        <div style="display:flex;gap:10px;font-size:11px;color:var(--teks-sekunder);margin-bottom:4px">
-          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#DC2626;margin-right:3px"></span>Alpha</span>
-          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#D97706;margin-right:3px"></span>Sakit</span>
-          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2563EB;margin-right:3px"></span>Terlambat</span>
-        </div>
-        <div id="trenPerBidang"></div>
-        <p style="font-size:10.5px;color:var(--teks-muted);margin:6px 0 0">Mengikuti pilihan Bidang di atas (Batch tidak berpengaruh).</p>
-      </div>
-    </div>
-
-    <div class="grid-2">
-      <div class="kartu">
-        <p class="stat-label" style="font-weight:600;margin-bottom:2px">${ICONS.building} Perbandingan Antar Bidang</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 12px">Dijumlah dari seluruh batch yang sudah diberi Bidang (baik saat upload maupun dikoreksi manual) — tidak mengikuti filter Bidang di atas, karena tujuannya membandingkan kelimanya sekaligus. Filter Batch tetap berlaku.</p>
-        <div id="perbandinganBidang"></div>
+        <div id="trenBulanan"></div>
+        <p style="font-size:10.5px;color:var(--teks-muted);margin:6px 0 0">Mengikuti filter Batch di atas.</p>
       </div>
 
       <div class="kartu">
         <p class="stat-label" style="font-weight:600;margin-bottom:2px">${ICONS.clock} Rekapitulasi Keterlambatan Masuk Kerja <span id="labelBar" style="font-weight:400;color:var(--teks-muted)"></span></p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Mengikuti filter Batch &amp; Bidang di atas · arahkan kursor ke batang untuk lihat nama</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Mengikuti filter Batch di atas · arahkan kursor ke batang untuk lihat nama</p>
         <div id="barKeterlambatan"></div>
       </div>
     </div>
   `;
 
   document.getElementById("filterBatch").addEventListener("change", muatDataVisualisasi);
-  document.getElementById("filterBidang").addEventListener("change", muatDataVisualisasi);
-
-  // Grafik "Seluruh Bidang" dimuat sekali saja — selalu menjumlahkan semua data, tidak ikut filter
-  const trenSeluruh = await api("/api/visualisasi?filter_mode=all");
-  renderTrenBulananGaris("trenSeluruh", trenSeluruh.tren_keseluruhan);
+  document.getElementById("btnEditJumlahRiil").addEventListener("click", editJumlahPegawaiRiil);
 
   muatDataVisualisasi();
 }
 
-function renderPerbandinganBidang(data) {
-  const wrap = document.getElementById("perbandinganBidang");
-  const adaData = data.some((d) => d.total_pegawai > 0);
-  if (!adaData) {
-    wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Belum ada pegawai yang diberi Bidang. Isi "Nama Bidang" saat unggah, atau koreksi kolom Bidang di tab Ringkasan Pegawai.</p>`;
+async function editJumlahPegawaiRiil() {
+  const sekarang = document.getElementById("statJumlahRiil").textContent;
+  const input = prompt("Isi jumlah pegawai riil kantor (angka referensi, diisi manual - tidak dihitung otomatis dari data):", sekarang === "?" ? "" : sekarang);
+  if (input === null) return;
+  const angka = parseInt(input, 10);
+  if (isNaN(angka) || angka < 0) {
+    alert("Masukkan angka yang valid.");
     return;
   }
-  const maxPegawai = Math.max(1, ...data.map((d) => d.total_pegawai));
-  wrap.innerHTML = `
-    <div class="tabel-wrap">
-      <div class="tabel-header-baris" style="grid-template-columns:1fr 1.6fr 0.8fr 0.8fr">
-        <span>BIDANG</span><span>TOTAL PEGAWAI</span><span>TELAT</span><span>ALPHA</span>
-      </div>
-      ${data
-        .map(
-          (d) => `<div class="tabel-baris" style="grid-template-columns:1fr 1.6fr 0.8fr 0.8fr">
-          <span style="font-weight:600">${d.bidang}</span>
-          <span style="display:flex;align-items:center;gap:8px">
-            <span style="flex:1;background:var(--abu-bg);border-radius:3px;height:9px">
-              <span style="display:block;width:${(d.total_pegawai / maxPegawai) * 100}%;height:100%;background:var(--biru);border-radius:3px"></span>
-            </span>
-            <span style="width:32px;text-align:right;font-size:12px">${d.total_pegawai}</span>
-          </span>
-          <span style="color:#2563EB">${d.telat}</span>
-          <span style="color:var(--merah-teks)">${d.alpha}</span>
-        </div>`
-        )
-        .join("")}
-    </div>
-  `;
+  await api("/api/pengaturan/jumlah_pegawai_riil", { method: "PUT", body: JSON.stringify({ nilai: angka }) });
+  document.getElementById("statJumlahRiil").textContent = angka;
 }
 
 async function muatDataVisualisasi() {
   const idBatch = document.getElementById("filterBatch").value;
-  const namaBidang = document.getElementById("filterBidang").value;
-
-  // Kalau satu Batch spesifik dipilih, filter Bidang otomatis tidak relevan
-  // (satu batch sudah pasti satu Bidang) — mode 'batch' menang.
-  const mode = idBatch !== "all" ? "batch" : namaBidang !== "all" ? "bidang" : "all";
-  const value = idBatch !== "all" ? idBatch : namaBidang !== "all" ? namaBidang : "";
+  const mode = idBatch !== "all" ? "batch" : "all";
+  const value = idBatch !== "all" ? idBatch : "";
 
   const labelBatch = idBatch === "all"
-    ? "Seluruh Batch"
+    ? "Seluruh Batch (akumulasi)"
     : document.getElementById("filterBatch").selectedOptions[0].textContent;
-  const labelBidang = mode === "batch" ? "" : namaBidang === "all" ? " · Semua Bidang" : ` · Bidang ${namaBidang}`;
 
-  document.getElementById("konteksBanner").innerHTML = `Menampilkan data: <b>${labelBatch}${labelBidang}</b>`;
-  document.getElementById("labelDonut").textContent = `(${labelBatch}${labelBidang})`;
-  document.getElementById("labelBar").textContent = `(${labelBatch}${labelBidang})`;
-  document.getElementById("labelTrenBidang").textContent = namaBidang === "all" ? "Per Bidang (pilih salah satu di atas)" : `Bidang ${namaBidang}`;
+  document.getElementById("konteksBanner").innerHTML = `Menampilkan data: <b>${labelBatch}</b>`;
+  document.getElementById("labelDonut").textContent = `(${labelBatch})`;
+  document.getElementById("labelBar").textContent = `(${labelBatch})`;
+  document.getElementById("labelTren").textContent = `(${labelBatch})`;
 
   const viz = await api(`/api/visualisasi?filter_mode=${mode}&filter_value=${encodeURIComponent(value)}`);
 
@@ -1086,9 +1061,8 @@ async function muatDataVisualisasi() {
   document.getElementById("statAlpha").textContent = viz.statistik.alpha;
 
   renderDonutKeterangan(viz.keterangan);
-  renderTrenBulananGaris("trenPerBidang", viz.tren_filter);
+  renderTrenBulananGaris("trenBulanan", viz.tren);
   renderBarKeterlambatan(viz.ranking_terlambat);
-  renderPerbandinganBidang(viz.perbandingan_bidang || []);
 }
 
 function renderBarKeterlambatan(data) {
@@ -1097,16 +1071,21 @@ function renderBarKeterlambatan(data) {
     wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Tidak ada catatan pada cakupan ini.</p>`;
     return;
   }
-  // Dibatasi ke 8 teratas supaya batangnya tetap cukup lebar dibaca dalam
-  // kartu setengah-lebar. Nama lengkap tidak muat sebagai label sumbu-X
-  // (banyak nama + gelar cukup panjang) - jadi sumbu-X cuma nomor urut,
-  // nama lengkap muncul lewat tooltip saat batangnya di-hover.
-  const tampil = data.slice(0, 8);
+  // PERBAIKAN (30 Jul 2026): dulu dibatasi 8 (kartu ini setengah-lebar).
+  // Sekarang kartu ini sejajar dengan grafik Tren (tidak lagi berbagi baris
+  // dengan Perbandingan Antar Bidang yang sudah dihapus), jadi ruangnya
+  // sama seperti sebelumnya - tapi diminta menampung s.d. 15 pegawai
+  // sekaligus, jadi SVG dilebarkan dan batangnya dibuat lebih ramping
+  // supaya tetap terbaca meski jumlah batangnya lebih banyak. Nama lengkap
+  // tidak muat sebagai label sumbu-X (banyak nama + gelar cukup panjang) -
+  // jadi sumbu-X cuma nomor urut, nama lengkap muncul lewat tooltip saat
+  // batangnya di-hover.
+  const tampil = data.slice(0, 15);
   const maxNilai = Math.max(1, ...tampil.map((d) => d.jumlah));
-  const lebar = 340, tinggi = 190, ruangBawah = 22, ruangAtas = 20;
+  const lebar = 620, tinggi = 190, ruangBawah = 22, ruangAtas = 20;
   const tinggiBar = tinggi - ruangBawah - ruangAtas;
   const jarak = lebar / tampil.length;
-  const lebarBar = jarak * 0.55;
+  const lebarBar = jarak * 0.6;
 
   const posisi = tampil.map((d, i) => {
     const h = (d.jumlah / maxNilai) * tinggiBar;
@@ -1155,16 +1134,43 @@ function renderBarKeterlambatan(data) {
 }
 
 function renderDonutKeterangan(data) {
-  const entri = Object.entries(data).sort((a, b) => b[1] - a[1]);
+  const labelUtama = Object.keys(WARNA_KETERANGAN);
+  // PERBAIKAN (31 Jul 2026): dulu pencocokan label PERSIS huruf besar/kecil
+  // ("Dinas Luar" != "DINAS LUAR" != "dinas luar" secara JS), padahal
+  // ternyata beberapa batch menyimpan Keterangan dalam HURUF BESAR SEMUA -
+  // jadi kategori yang sebenarnya sama malah jatuh ke "Lainnya". Sekarang
+  // dicocokkan tanpa peduli besar/kecil huruf.
+  const kategoriByLower = {};
+  labelUtama.forEach((k) => (kategoriByLower[k.toLowerCase()] = k));
+
+  const totalPerKategori = {};
+  labelUtama.forEach((k) => (totalPerKategori[k] = 0));
+  // Label yang BENAR-BENAR tidak dikenali (bukan cuma beda huruf besar/
+  // kecil) tetap ditotal terpisah sebagai "Lainnya" - supaya tidak ada
+  // hari yang diam-diam "hilang" dari total donut, dan rinciannya tetap
+  // bisa ditelusuri lewat tooltip.
+  const rincianLainnya = [];
+  Object.entries(data).forEach(([labelMentah, jumlah]) => {
+    const kunci = (labelMentah || "").trim().toLowerCase();
+    if (kategoriByLower[kunci]) {
+      totalPerKategori[kategoriByLower[kunci]] += jumlah || 0;
+    } else {
+      rincianLainnya.push([labelMentah, jumlah || 0]);
+    }
+  });
+  const entri = labelUtama.map((label) => [label, totalPerKategori[label]]);
+  const jumlahLainnya = rincianLainnya.reduce((s, [, v]) => s + v, 0);
+  if (jumlahLainnya > 0) entri.push(["Lainnya", jumlahLainnya]);
+
   const total = entri.reduce((s, [, v]) => s + v, 0);
   const r = 52, cx = 60, cy = 60, keliling = 2 * Math.PI * r;
   let sudutSoFar = 0;
 
   const segmen = entri.map(([label, jumlah], i) => {
-    const panjang = (jumlah / total) * keliling;
+    const panjang = total > 0 ? (jumlah / total) * keliling : 0;
     const offsetMulai = -sudutSoFar;
     sudutSoFar += panjang;
-    return { label, jumlah, warna: PALET_KETERANGAN[i % PALET_KETERANGAN.length], panjang, offsetMulai, i };
+    return { label, jumlah, warna: WARNA_KETERANGAN[label] || WARNA_LAINNYA, panjang, offsetMulai, i };
   });
 
   const lingkaran = segmen
@@ -1184,6 +1190,17 @@ function renderDonutKeterangan(data) {
     </div>
   `;
 
+  // Untuk segmen "Lainnya", tooltip menampilkan rincian label aslinya
+  // (mis. "Hadir: 40, Tidak diketahui: 15"), bukan cuma angka totalnya.
+  function isiTooltip(s) {
+    const persen = total > 0 ? ((s.jumlah / total) * 100).toFixed(1) : "0.0";
+    if (s.label === "Lainnya") {
+      const rincian = rincianLainnya.map(([lbl, v]) => `${lbl}: ${v}`).join("<br>");
+      return `<b>Lainnya</b> (${s.jumlah} hari, ${persen}%)<br><span style="opacity:.8">${rincian}</span>`;
+    }
+    return `<b>${s.label}</b><br>${s.jumlah} hari (${persen}%)`;
+  }
+
   const elemenLingkaran = document.querySelectorAll("#donutChart .segmen-donut");
 
   // Animasi tumbuh dari 0 ke ukuran sebenarnya saat pertama tampil
@@ -1200,26 +1217,33 @@ function renderDonutKeterangan(data) {
     const s = segmen[idx];
     el.addEventListener("mouseenter", () => el.setAttribute("stroke-width", "22"));
     el.addEventListener("mouseleave", () => { el.setAttribute("stroke-width", "18"); sembunyikanTooltip(); });
-    el.addEventListener("mousemove", (e) => {
-      const persen = ((s.jumlah / total) * 100).toFixed(1);
-      tampilkanTooltip(`<b>${s.label}</b><br>${s.jumlah} hari (${persen}%)`, e.clientX, e.clientY);
-    });
+    el.addEventListener("mousemove", (e) => tampilkanTooltip(isiTooltip(s), e.clientX, e.clientY));
   });
 
-  document.getElementById("donutLegend").innerHTML = segmen
-    .map(
-      (s) => `<div class="legenda-item" data-index="${s.i}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 6px;font-size:12.5px;border-radius:6px;cursor:pointer;transition:background-color .15s">
-      <span style="display:flex;align-items:center;gap:8px;color:var(--teks-utama)">
-        <span style="width:10px;height:10px;border-radius:3px;background:${s.warna};display:inline-block"></span>
-        ${s.label}
-      </span>
-      <span style="color:var(--teks-sekunder)">${s.jumlah} (${((s.jumlah / total) * 100).toFixed(1)}%)</span>
-    </div>`
-    )
-    .join("") || `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Belum ada data.</p>`;
+  // Legenda disusun 2 kolom x 6 baris (kolom pertama terisi dulu dari atas
+  // ke bawah, baru lanjut ke kolom kedua) - 11 kategori tetap + "Lainnya"
+  // kalau ada label yang benar-benar tak dikenali, supaya susunannya
+  // konsisten dan gampang dibaca sekilas antar batch.
+  document.getElementById("donutLegend").innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;grid-auto-flow:column;grid-template-rows:repeat(6,auto);gap:2px 10px">
+      ${segmen
+        .map(
+          (s) => `<div class="legenda-item" data-index="${s.i}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 6px;font-size:12px;border-radius:6px;cursor:pointer;transition:background-color .15s">
+          <span style="display:flex;align-items:center;gap:6px;color:var(--teks-utama);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            <span style="width:9px;height:9px;border-radius:3px;background:${s.warna};display:inline-block;flex-shrink:0"></span>
+            ${s.label}
+          </span>
+          <span style="color:var(--teks-sekunder);white-space:nowrap;padding-left:6px">${s.jumlah} (${total > 0 ? ((s.jumlah / total) * 100).toFixed(1) : "0.0"}%)</span>
+        </div>`
+        )
+        .join("")}
+    </div>
+  `;
 
   // Hover di legenda ikut menyorot segmen donutnya (interaksi timbal balik)
+  // + tampilkan tooltip rincian yang sama (khususnya berguna untuk "Lainnya").
   document.querySelectorAll("#donutLegend .legenda-item").forEach((item) => {
+    const s = segmen[Number(item.dataset.index)];
     const el = document.querySelector(`#donutChart .segmen-donut[data-index="${item.dataset.index}"]`);
     item.addEventListener("mouseenter", () => {
       item.style.backgroundColor = "var(--abu-bg)";
@@ -1228,7 +1252,9 @@ function renderDonutKeterangan(data) {
     item.addEventListener("mouseleave", () => {
       item.style.backgroundColor = "transparent";
       if (el) el.setAttribute("stroke-width", "18");
+      sembunyikanTooltip();
     });
+    item.addEventListener("mousemove", (e) => tampilkanTooltip(isiTooltip(s), e.clientX, e.clientY));
   });
 }
 
@@ -1241,6 +1267,46 @@ function renderTrenBulananGaris(elId, data) {
   const wrap = document.getElementById(elId);
   if (!data.length) {
     wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Belum ada batch dengan periode yang tercatat.</p>`;
+    return;
+  }
+
+  // PERBAIKAN (31 Jul 2026): dulu kalau data cuma 1 bulan, langkahX dihitung
+  // 0 (areaLebar / (panjang-1) dihindari lewat kondisi length>1 ? ... : 0),
+  // jadi SEMUA titik (Alpha/Sakit/Terlambat) numpuk di x yang sama, dan
+  // jalurMengalir() cuma menghasilkan path "M x y" TANPA garis (perintah
+  // SVG "moveto" doang, tidak ada "lineto"/"curveto") - jadi garisnya
+  // sama sekali tidak kelihatan, cuma 3 titik kecil menumpuk di kiri.
+  // Bukan bug rendering SVG, tapi memang secara matematis TIDAK ADA
+  // "tren" yang bisa digambar dari 1 titik data - jadi sekarang, kalau
+  // datanya cuma 1 bulan, tampilkan ringkasan angka bulan itu apa adanya
+  // (bukan grafik garis kosong yang terlihat rusak), dengan pesan yang
+  // jujur bahwa perlu minimal 2 bulan untuk menggambar tren.
+  if (data.length === 1) {
+    const d = data[0];
+    const seri = [
+      { kunci: "terlambat", warna: "#2563EB", label: "Terlambat" },
+      { kunci: "sakit", warna: "#D97706", label: "Sakit" },
+      { kunci: "alpha", warna: "#DC2626", label: "Alpha" },
+    ];
+    wrap.innerHTML = `
+      <div style="padding:18px 4px">
+        <p style="font-size:12px;color:var(--teks-muted);margin:0 0 12px">
+          Baru ada data untuk <b style="color:var(--teks-sekunder)">${labelBulan(d.bulan)}</b> — tren garis perlu minimal 2 bulan untuk dibandingkan. Berikut angkanya:
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          ${seri
+            .map(
+              (s) => `<div style="flex:1;min-width:100px;border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+              <p style="font-size:11px;color:var(--teks-muted);margin:0 0 4px;display:flex;align-items:center;gap:6px">
+                <span style="width:8px;height:8px;border-radius:50%;background:${s.warna};display:inline-block"></span>${s.label}
+              </p>
+              <p style="font-size:19px;font-weight:700;color:var(--teks-utama);margin:0">${d[s.kunci]}<span style="font-size:11px;font-weight:400;color:var(--teks-muted)"> hari</span></p>
+            </div>`
+            )
+            .join("")}
+        </div>
+      </div>
+    `;
     return;
   }
 
