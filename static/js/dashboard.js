@@ -14,6 +14,7 @@ const ICONS = {
   alertTri: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M10 3.5l7.5 13H2.5l7.5-13z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="10" y1="8.5" x2="10" y2="11.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14" r="0.9" fill="currentColor"/></svg>`,
   x: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
   check: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  search: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5" stroke="currentColor" stroke-width="1.7"/><line x1="12.3" y1="12.3" x2="17" y2="17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`,
 };
 
 // Setiap kali isi #content diganti (apa pun fungsi render-nya), otomatis
@@ -247,27 +248,67 @@ async function renderProses() {
       <span class="icon-langkah">01</span>
       <p style="font-size:16px;font-weight:700;margin:0" class="judul-serif">Unggah &amp; Proses</p>
     </div>
-    <div class="dropzone" id="dropzone">
-      <p style="font-size:13px;font-weight:600;margin:0 0 12px">Tarik &amp; letakkan file PDF di sini, atau pilih manual</p>
-      <input type="file" id="inputFile" accept=".pdf" multiple style="display:none" />
-      <input type="file" id="inputFolder" webkitdirectory directory multiple style="display:none" />
-      <button type="button" class="btn-sekunder" onclick="document.getElementById('inputFile').click()">Pilih File PDF</button>
-      <button type="button" class="btn-sekunder" onclick="document.getElementById('inputFolder').click()">Pilih Folder</button>
-    </div>
-    <div id="daftarFileTerpilih" style="margin-bottom:16px"></div>
-    <label style="font-size:12.5px;color:var(--teks-sekunder);display:block;margin-bottom:5px;font-weight:600">Bidang untuk batch ini</label>
-    <select id="inputBidang" style="width:100%;margin-bottom:16px">
-      <option value="">— Campuran / belum ditentukan —</option>
-      ${daftarBidang.map((b) => `<option value="${b.label}">${b.label}</option>`).join("")}
-    </select>
-    <button class="btn-primer" id="btnProses" style="width:100%">Proses Semua File</button>
-
-    <div id="progresProses" style="display:none;margin-top:16px">
-      <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--teks-sekunder);margin-bottom:6px">
-        <span id="progresLabel">Memproses...</span>
-        <span id="progresPersen">0%</span>
+    <div id="panelUnggah">
+      <div class="dropzone" id="dropzone">
+        <p style="font-size:13px;font-weight:600;margin:0 0 12px">Tarik &amp; letakkan file PDF di sini, atau pilih manual</p>
+        <input type="file" id="inputFile" accept=".pdf" multiple style="display:none" />
+        <input type="file" id="inputFolder" webkitdirectory directory multiple style="display:none" />
+        <button type="button" class="btn-sekunder" onclick="document.getElementById('inputFile').click()">Pilih File PDF</button>
+        <button type="button" class="btn-sekunder" onclick="document.getElementById('inputFolder').click()">Pilih Folder</button>
       </div>
-      <div class="progress-track"><div class="progress-fill" id="progresFill" style="width:0%"></div></div>
+      <div id="daftarFileTerpilih" style="margin-bottom:16px"></div>
+      <label style="font-size:12.5px;color:var(--teks-sekunder);display:block;margin-bottom:5px;font-weight:600">Bidang untuk batch ini</label>
+      <select id="inputBidang" style="width:100%;margin-bottom:16px">
+        <option value="">— Campuran / belum ditentukan —</option>
+        ${daftarBidang.map((b) => `<option value="${b.label}">${b.label}</option>`).join("")}
+      </select>
+      <button class="btn-primer" id="btnProses" style="width:100%">Proses Semua File</button>
+    </div>
+
+    <div id="progresProses" style="display:none">
+      <div class="panel-proses panel-proses-takeover">
+        <div class="partikel-proses">
+          ${Array.from({ length: 6 })
+            .map((_, i) => {
+              const kiri = 8 + i * 15 + (i % 2) * 5;
+              const durasi = 6 + (i % 4) * 1.6;
+              const tunda = i * 0.9;
+              const ukuran = 4 + (i % 3) * 3;
+              return `<span style="left:${kiri}%;width:${ukuran}px;height:${ukuran}px;animation-duration:${durasi}s;animation-delay:${tunda}s"></span>`;
+            })
+            .join("")}
+        </div>
+        <div class="proses-cincin-wrap proses-cincin-wrap-besar">
+          <div class="cincin-dekoratif"></div>
+          <svg viewBox="0 0 100 100" class="proses-cincin">
+            <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6" />
+            <circle cx="50" cy="50" r="44" fill="none" stroke="url(#gradProses)" stroke-width="6"
+              stroke-linecap="round" id="progresRingFill" stroke-dasharray="276.5" stroke-dashoffset="276.5"
+              transform="rotate(-90 50 50)" />
+            <defs>
+              <linearGradient id="gradProses" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#2563EB" />
+                <stop offset="100%" stop-color="#8B5CF6" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <div class="proses-cincin-isi">
+            <span id="progresPersen" class="proses-persen proses-persen-besar">0%</span>
+            <span class="proses-ikon-scan">${ICONS.search}</span>
+          </div>
+        </div>
+
+        <p id="progresLabel" class="proses-label proses-label-besar">Memulai batch...</p>
+
+        <div class="proses-stat-grid proses-stat-grid-besar">
+          <div class="proses-stat"><span id="statDiproses">0/0</span><small>Diproses</small></div>
+          <div class="proses-stat proses-stat-sukses"><span id="statBerhasil">0</span><small>Berhasil</small></div>
+          <div class="proses-stat proses-stat-masalah"><span id="statBermasalah">0</span><small>Bermasalah</small></div>
+          <div class="proses-stat"><span id="statSisaWaktu">-</span><small>Sisa waktu</small></div>
+        </div>
+
+        <div class="proses-ticker proses-ticker-besar" id="progresTicker"></div>
+      </div>
     </div>
 
     <div id="hasilProses" style="margin-top:22px;display:none">
@@ -365,16 +406,46 @@ async function renderProses() {
       return;
     }
     const btn = document.getElementById("btnProses");
+    const panelUnggah = document.getElementById("panelUnggah");
     const progresWrap = document.getElementById("progresProses");
     const progresLabel = document.getElementById("progresLabel");
     const progresPersen = document.getElementById("progresPersen");
-    const progresFill = document.getElementById("progresFill");
+    const progresRingFill = document.getElementById("progresRingFill");
+    const statDiproses = document.getElementById("statDiproses");
+    const statBerhasil = document.getElementById("statBerhasil");
+    const statBermasalah = document.getElementById("statBermasalah");
+    const statSisaWaktu = document.getElementById("statSisaWaktu");
+    const ticker = document.getElementById("progresTicker");
+    const KELILING_CINCIN = 2 * Math.PI * 44; // r=44, harus sama dengan atribut SVG
 
     btn.disabled = true;
+
+    // FITUR BARU (31 Jul 2026): dulu panel proses cuma DITAMBAHKAN di bawah
+    // tombol - dropzone, daftar file, & tombolnya sendiri tetap kelihatan
+    // di atas, jadi terasa seperti "menu tempel" bukan transisi sungguhan.
+    // Sekarang panel unggah benar-benar bertransisi KELUAR (blur + mengecil
+    // + memudar sekaligus) sebelum disembunyikan, baru panel proses masuk
+    // mengambil alih seluruh perhatian (fade + scale-in).
+    panelUnggah.classList.add("transisi-keluar");
+    await new Promise((r) => setTimeout(r, 420));
+    panelUnggah.style.display = "none";
+
     progresWrap.style.display = "block";
+    progresWrap.classList.remove("transisi-keluar");
+    progresWrap.classList.add("transisi-masuk");
     progresLabel.textContent = "Memulai batch...";
-    progresFill.style.width = "0%";
     progresPersen.textContent = "0%";
+    progresRingFill.setAttribute("stroke-dasharray", `${KELILING_CINCIN}`);
+    progresRingFill.setAttribute("stroke-dashoffset", `${KELILING_CINCIN}`);
+    statDiproses.textContent = `0/${filesTerpilih.length}`;
+    statBerhasil.textContent = "0";
+    statBermasalah.textContent = "0";
+    statSisaWaktu.textContent = "-";
+    ticker.innerHTML = "";
+
+    let jumlahBerhasil = 0;
+    let jumlahBermasalah = 0;
+    const waktuMulai = Date.now();
 
     try {
       // 1) buat batch kosong dulu
@@ -389,7 +460,7 @@ async function renderProses() {
       const total = filesTerpilih.length;
       for (let i = 0; i < total; i++) {
         const file = filesTerpilih[i];
-        progresLabel.textContent = `Memproses ${i + 1} dari ${total}: ${file.name}`;
+        progresLabel.textContent = `Memindai: ${file.name}`;
         const baris = document.querySelector(`[data-file-row="${i}"]`);
         if (baris) baris.style.background = "#FBF3DC";
 
@@ -400,11 +471,35 @@ async function renderProses() {
         const fileRes = await fetch("/api/proses/file", { method: "POST", body: fileForm });
         const fileData = await ambilJsonAtauLempar(fileRes);
 
-        if (baris) baris.style.background = fileData.bermasalah ? "#FBE6E1" : "#E4F0E6";
+        const bermasalah = !!fileData.bermasalah;
+        if (baris) baris.style.background = bermasalah ? "#FBE6E1" : "#E4F0E6";
+        if (bermasalah) {
+          jumlahBermasalah++;
+          perbaruiDenganPop(statBermasalah, jumlahBermasalah);
+        } else {
+          jumlahBerhasil++;
+          perbaruiDenganPop(statBerhasil, jumlahBerhasil);
+        }
 
+        // --- Panel proses: cincin, statistik, dan ticker file selesai ---
         const persen = Math.round(((i + 1) / total) * 100);
-        progresFill.style.width = `${persen}%`;
-        progresPersen.textContent = `${persen}%`;
+        perbaruiDenganPop(progresPersen, `${persen}%`);
+        progresRingFill.setAttribute("stroke-dashoffset", `${KELILING_CINCIN * (1 - persen / 100)}`);
+        perbaruiDenganPop(statDiproses, `${i + 1}/${total}`);
+
+        const rataRataPerFile = (Date.now() - waktuMulai) / (i + 1);
+        const sisaFile = total - (i + 1);
+        statSisaWaktu.textContent = sisaFile === 0 ? "Selesai" : formatDurasiSisa(rataRataPerFile * sisaFile);
+
+        const chip = document.createElement("span");
+        chip.className = `ticker-chip ${bermasalah ? "ticker-chip-masalah" : "ticker-chip-sukses"}`;
+        chip.innerHTML = `${bermasalah ? ICONS.alertTri : ICONS.check} ${file.name}`;
+        ticker.appendChild(chip);
+        ticker.scrollLeft = ticker.scrollWidth;
+        // Batasi jumlah chip yang disimpan di DOM (cuma buat performa,
+        // tidak memengaruhi hasil proses) - riwayat lengkapnya tetap ada
+        // di daftar file & pratinjau hasil setelah batch selesai.
+        while (ticker.children.length > 40) ticker.removeChild(ticker.firstChild);
       }
 
       // 3) tutup batch: hitung ulang jumlah pegawai + ambil pratinjau & log
@@ -416,16 +511,47 @@ async function renderProses() {
       });
       const selesaiData = await ambilJsonAtauLempar(selesaiRes);
 
-      btn.disabled = false;
       progresLabel.textContent = "Selesai";
       selesaiData.batch_id = batchId;
+
+      // Panel proses ikut bertransisi KELUAR (konsisten dengan transisi
+      // masuk di awal) sebelum panel Pratinjau Hasil ditampilkan.
+      await new Promise((r) => setTimeout(r, 500));
+      progresWrap.classList.remove("transisi-masuk");
+      progresWrap.classList.add("transisi-keluar");
+      await new Promise((r) => setTimeout(r, 420));
+      progresWrap.style.display = "none";
+
+      btn.disabled = false;
       tampilkanHasilProses(selesaiData);
     } catch (err) {
       btn.disabled = false;
+      panelUnggah.style.display = "block";
+      panelUnggah.classList.remove("transisi-keluar");
       progresWrap.style.display = "none";
       alert(err.message || "Tidak bisa terhubung ke server. Pastikan 'python app.py' masih berjalan, lalu coba lagi.");
     }
   }
+}
+
+function formatDurasiSisa(ms) {
+  const detik = Math.round(ms / 1000);
+  if (detik < 60) return `~${detik} detik`;
+  const menit = Math.floor(detik / 60);
+  const sisaDetik = detik % 60;
+  return `~${menit}m ${sisaDetik}d`;
+}
+
+// Set teks elemen + picu animasi "pop" (lihat @keyframes popNilai di style.css).
+// Untuk .proses-persen, animasinya langsung di elemen itu sendiri; untuk
+// kartu statistik (.proses-stat > span), animasinya di elemen INDUK supaya
+// cocok dengan selector CSS ".proses-stat.pop span".
+function perbaruiDenganPop(el, teksBaru) {
+  el.textContent = teksBaru;
+  const target = el.classList.contains("proses-persen") ? el : el.parentElement;
+  target.classList.remove("pop");
+  void target.offsetWidth; // paksa reflow supaya animasi bisa diulang tiap kali dipanggil
+  target.classList.add("pop");
 }
 
 async function ambilJsonAtauLempar(res) {
@@ -437,7 +563,11 @@ async function ambilJsonAtauLempar(res) {
 }
 
 function tampilkanHasilProses(data) {
-  document.getElementById("hasilProses").style.display = "block";
+  const hasilProses = document.getElementById("hasilProses");
+  hasilProses.style.display = "block";
+  hasilProses.classList.remove("transisi-masuk");
+  void hasilProses.offsetWidth; // paksa reflow supaya animasi bisa diulang tiap kali dipanggil
+  hasilProses.classList.add("transisi-masuk");
   const previewRows = document.getElementById("previewRows");
   previewRows.innerHTML =
     (data.pratinjau || [])
