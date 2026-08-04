@@ -502,13 +502,22 @@ input.edit-field:disabled, select.edit-field:disabled {
   position: relative; overflow: hidden;
   flex-direction: column; align-items: center; text-align: center;
   padding: 46px 24px 34px; gap: 0;
-  background: linear-gradient(120deg, var(--biru-muda-bg), var(--kartu-bg), var(--biru-muda-bg));
-  background-size: 240% 240%;
-  animation: gradientMengalir 9s ease infinite;
+  background: linear-gradient(120deg, var(--biru-muda-bg), var(--kartu-bg) 55%, var(--biru-muda-bg));
+  /* PERBAIKAN (1 Agu 2026): "contain" mengurung reflow/repaint di dalam
+     panel ini saja - kalaupun ada perhitungan ulang tata letak di sini
+     (mis. saat ticker menambah chip baru), browser tidak perlu ikut
+     menghitung ulang elemen LAIN di luar panel (sidebar, header, dst). */
+  contain: layout paint style;
 }
-@keyframes gradientMengalir {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
+
+/* Hint eksplisit ke browser: elemen-elemen dekoratif ini akan terus-
+   menerus dianimasikan lewat transform/opacity - siapkan layer GPU
+   terpisah dari awal (compositor thread), supaya animasinya tidak pernah
+   ikut membebani main thread yang sedang sibuk memproses fetch/JSON per
+   file. Dipakai secukupnya (cuma elemen yang MEMANG selalu bergerak),
+   karena will-change juga punya biaya memori kalau dipasang berlebihan. */
+.cincin-dekoratif, .proses-cincin-wrap-besar::before, .partikel-proses span, .proses-ikon-scan {
+  will-change: transform;
 }
 
 /* Partikel melayang di latar panel - murni dekoratif, di belakang konten */
@@ -558,14 +567,11 @@ html[data-tema="gelap"] .partikel-proses span { opacity: .18; }
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 4px;
 }
-.proses-persen { font-size: 18px; font-weight: 700; color: var(--teks-utama); transition: transform .1s ease; }
+.proses-persen { font-size: 18px; font-weight: 700; color: var(--teks-utama); }
 .proses-persen-besar { font-size: 30px; }
-.proses-persen.pop, .proses-stat.pop span { animation: popNilai .38s cubic-bezier(.34,1.56,.64,1); }
-@keyframes popNilai {
-  0% { transform: scale(1); }
-  45% { transform: scale(1.22); }
-  100% { transform: scale(1); }
-}
+/* Animasi "pop" saat nilai berubah sekarang dijalankan lewat Web
+   Animations API (element.animate()) di dashboard.js::perbaruiDenganPop -
+   lebih ringan daripada toggle class + reflow paksa, lihat catatan di sana. */
 
 .proses-ikon-scan { color: var(--biru); opacity: .65; animation: scanBerdenyut 1.4s ease-in-out infinite; }
 .proses-ikon-scan .ikon { width: 14px; height: 14px; }
@@ -618,8 +624,7 @@ html[data-tema="gelap"] .ticker-chip-sukses { background: #0F2A1B; color: #4ADE8
 
 @media (prefers-reduced-motion: reduce) {
   .panel-proses-takeover, .proses-ikon-scan, .ticker-chip, .ticker-chip-sukses .ikon path,
-  .cincin-dekoratif, .proses-cincin-wrap-besar::before, .partikel-proses span,
-  .proses-persen.pop, .proses-stat.pop span {
+  .cincin-dekoratif, .proses-cincin-wrap-besar::before, .partikel-proses span {
     animation: none !important;
   }
   #panelUnggah, #progresProses, #hasilProses { transition: none; filter: none !important; }

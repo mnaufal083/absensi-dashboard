@@ -159,13 +159,25 @@ create table if not exists admin_profiles (
 );
 
 -- ----------------------------------------------------------------------------
--- 6. RECORD_EDIT_LOG — audit trail semua perubahan data (lintas batch)
+-- 6. RECORD_EDIT_LOG — audit trail semua perubahan data (lintas batch),
+--    SEKALIGUS aktivitas level-batch (upload & hapus batch, record_table =
+--    'batch'). PERBAIKAN (1 Agu 2026):
+--    - record_id sekarang boleh kosong (null) untuk aktivitas level-batch
+--      yang tidak terikat ke satu baris attendance/ringkasan tertentu.
+--    - batch_id berubah dari "on delete cascade" jadi "on delete set null" -
+--      kalau tetap "cascade", log "Hapus Batch" itu sendiri akan ikut
+--      terhapus otomatis begitu batch-nya benar-benar dihapus, sehingga
+--      jejaknya hilang seketika (kontra-produktif untuk audit trail).
+--    - batch_label disimpan terpisah (bukan cuma lewat join ke batches)
+--      supaya nama batch tetap bisa ditampilkan di Log Aktivitas walau
+--      batch aslinya sudah dihapus dan batch_id di baris ini jadi null.
 -- ----------------------------------------------------------------------------
 create table if not exists record_edit_log (
     id              uuid primary key default gen_random_uuid(),
-    batch_id        uuid not null references batches(id) on delete cascade,
-    record_id       uuid not null,               -- id baris di attendance_records atau ringkasan_pegawai
-    record_table    text not null,                -- 'attendance_records' | 'ringkasan_pegawai'
+    batch_id        uuid references batches(id) on delete set null,
+    batch_label     text not null default '',
+    record_id       uuid,                          -- id baris di attendance_records/ringkasan_pegawai; null untuk aktivitas level-batch
+    record_table    text not null,                 -- 'attendance_records' | 'ringkasan_pegawai' | 'batch'
     nama_pegawai    text not null default '',
     field_diubah    text not null,
     nilai_lama      text,

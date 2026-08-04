@@ -211,9 +211,30 @@ def catat_unduhan(batch_id, user_id):
     }).eq("id", batch_id).execute()
 
 
+def catat_log_batch(batch_id, batch_label, aksi, detail, user_id):
+    """Catat aktivitas level-batch (upload/hapus) ke record_edit_log yang
+    sama dipakai log edit per-field, supaya semuanya tampil dalam satu
+    linimasa di halaman Log Aktivitas. record_table='batch' membedakannya
+    dari log edit field biasa."""
+    supabase.table("record_edit_log").insert({
+        "batch_id": batch_id,
+        "batch_label": batch_label or "",
+        "record_id": None,
+        "record_table": "batch",
+        "nama_pegawai": "",
+        "field_diubah": aksi,
+        "nilai_lama": "",
+        "nilai_baru": detail,
+        "diubah_oleh": user_id,
+    }).execute()
+
+
 def hapus_batch(batch_id):
-    # attendance_records, ringkasan_pegawai, berkas_bermasalah, record_edit_log
-    # otomatis ikut terhapus karena "on delete cascade" di schema.sql
+    # attendance_records, ringkasan_pegawai, berkas_bermasalah otomatis ikut
+    # terhapus karena "on delete cascade" di schema.sql. record_edit_log
+    # TIDAK ikut terhapus (sudah diubah jadi "on delete set null") - jadi
+    # jejak aktivitas "Hapus Batch" yang dicatat oleh pemanggil (lihat
+    # app.py::api_hapus_batch) tetap bertahan setelah baris ini dieksekusi.
     supabase.table("batches").delete().eq("id", batch_id).execute()
 
 
@@ -459,14 +480,40 @@ def log_aktivitas(limit=100):
 # tiap pegawai sudah diisi (otomatis kalau diisi manual saat upload, atau
 # dikoreksi satu per satu lewat tab Ringkasan Pegawai).
 # ---------------------------------------------------------------------
+def _batch_ids_untuk_tahun(tahun):
+    """Cari semua batch_id yang periode_akhir-nya jatuh di tahun tertentu.
+    Dipakai mode filter 'tahun' - attendance_records/ringkasan_pegawai
+    sendiri tidak menyimpan tanggal periode, jadi harus ditelusuri lewat
+    tabel batches dulu."""
+    rows = _ambil_semua(supabase.table("batches").select("id,periode_akhir"))
+    return [r["id"] for r in rows if (r.get("periode_akhir") or "")[:4] == str(tahun)]
+
+
+def daftar_tahun_tersedia():
+    """Daftar tahun (unik, urut terbaru dulu) yang punya batch dengan
+    periode_akhir tercatat - dipakai untuk mengelompokkan dropdown Pilih
+    Batch di Visualisasi per tahun (lihat FITUR BARU 1 Agu 2026 di bawah)."""
+    rows = _ambil_semua(supabase.table("batches").select("periode_akhir"))
+    tahun = sorted({(r.get("periode_akhir") or "")[:4] for r in rows if r.get("periode_akhir")}, reverse=True)
+    return tahun
+
+
 def _terapkan_filter(q, mode, value, kolom_bidang="bidang"):
     """Tempelkan filter ke query Supabase sesuai mode. mode='batch' filter
-    by batch_id, mode='bidang' filter by kolom bidang (ilike), mode='all'
+    by batch_id, mode='bidang' filter by kolom bidang (ilike), mode='tahun'
+    filter ke semua batch yang periode_akhir-nya jatuh di tahun tsb
+    (FITUR BARU 1 Agu 2026 - supaya statistik tidak cuma bisa dilihat per
+    satu batch atau akumulasi SELAMANYA, ada jenjang di antaranya), mode='all'
     tidak menambah filter apa pun."""
     if mode == "batch" and value:
         return q.eq("batch_id", value)
     if mode == "bidang" and value:
         return q.ilike(kolom_bidang, value)
+    if mode == "tahun" and value:
+        ids = _batch_ids_untuk_tahun(value)
+        if not ids:
+            return q.eq("batch_id", "00000000-0000-0000-0000-000000000000")  # sengaja tidak match apa pun
+        return q.in_("batch_id", ids)
     return q
 
 
@@ -501,6 +548,8 @@ def tren_bulanan(mode="all", value=None):
     batches = supabase.table("batches").select("id, periode_akhir").execute().data
     if mode == "batch" and value:
         batches = [b for b in batches if b["id"] == value]
+    if mode == "tahun" and value:
+        batches = [b for b in batches if (b.get("periode_akhir") or "")[:4] == str(value)]
 
     bulan_ke_batch = {}
     for b in batches:

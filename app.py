@@ -128,13 +128,23 @@ def ringkasan_beranda():
     perlu_ditinjau = len([b for b in semua if b["status"] == "draft"])
     total_pegawai = sum(b.get("jumlah_pegawai", 0) for b in semua)
     aktivitas = db.log_aktivitas(limit=8)
+
+    # PERBAIKAN (1 Agu 2026): dulu ranking Alpha/Terlambat di Beranda selalu
+    # akumulasi SEMUA batch sejak sistem dipakai pertama kali (mode="all"),
+    # jadi makin lama dipakai (lintas bulan/tahun) angkanya terus menumpuk
+    # dan makin kurang mencerminkan kondisi TERKINI. Beranda sekarang
+    # dilingkupi tahun berjalan saja - untuk lihat akumulasi lintas tahun
+    # atau tahun-tahun sebelumnya, itu sudah bisa lewat filter Tahun di
+    # halaman Visualisasi.
+    tahun_ini = str(datetime.now().year)
     return jsonify({
         "total_batch": total_batch,
         "perlu_ditinjau": perlu_ditinjau,
         "total_pegawai": total_pegawai,
         "aktivitas_terbaru": aktivitas,
-        "ranking_alpha": db.ranking_pegawai("alpha", limit=15),
-        "ranking_terlambat": db.ranking_pegawai("terlambat", limit=15),
+        "tahun_ditampilkan": tahun_ini,
+        "ranking_alpha": db.ranking_pegawai("alpha", "tahun", tahun_ini, limit=15),
+        "ranking_terlambat": db.ranking_pegawai("terlambat", "tahun", tahun_ini, limit=15),
     })
 
 
@@ -282,6 +292,16 @@ def proses_selesai():
     periode_awal, periode_akhir = db.perbarui_periode_batch(batch_id)
     attendance = db.ambil_attendance(batch_id)
     log_bermasalah = db.ambil_berkas_bermasalah(batch_id)
+
+    # FITUR BARU (1 Agu 2026): dulu Log Aktivitas cuma mencatat edit field
+    # satu-satu, jadi upload batch (aktivitas paling sering terjadi) sama
+    # sekali tidak tercatat. Sekarang dicatat juga, dengan ringkasan jumlah
+    # file & pegawai supaya langsung informatif tanpa perlu buka detail batch.
+    batch = db.ambil_batch(batch_id)
+    jumlah_bermasalah = len(log_bermasalah)
+    detail = f"{jumlah_pegawai} pegawai" + (f", {jumlah_bermasalah} berkas bermasalah" if jumlah_bermasalah else "")
+    db.catat_log_batch(batch_id, batch.get("label", ""), "Upload Batch", detail, session["user"]["email"])
+
     return jsonify({
         "ok": True,
         "batch_id": batch_id,
@@ -303,6 +323,12 @@ def api_daftar_batch():
     bidang = request.args.get("bidang") or None
     status = request.args.get("status") or None
     return jsonify(db.daftar_batch(bidang, status))
+
+
+@app.route("/api/tahun-tersedia")
+@login_required
+def api_tahun_tersedia():
+    return jsonify(db.daftar_tahun_tersedia())
 
 
 @app.route("/api/batches/<batch_id>")
@@ -333,6 +359,13 @@ def api_tandai_draf(batch_id):
 @app.route("/api/batches/<batch_id>", methods=["DELETE"])
 @login_required
 def api_hapus_batch(batch_id):
+    # Catat log SEBELUM batch benar-benar dihapus (perlu label & jumlah
+    # pegawainya dulu selagi masih ada) - lihat catatan "on delete set null"
+    # di schema.sql supaya baris log ini sendiri tidak ikut terhapus.
+    batch = db.ambil_batch(batch_id)
+    if batch:
+        detail = f"{batch.get('jumlah_pegawai', 0)} pegawai, periode {batch.get('periode_awal') or '-'} s.d. {batch.get('periode_akhir') or '-'}"
+        db.catat_log_batch(batch_id, batch.get("label", ""), "Hapus Batch", detail, session["user"]["email"])
     db.hapus_batch(batch_id)
     return jsonify({"ok": True})
 

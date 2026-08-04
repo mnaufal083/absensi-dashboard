@@ -204,12 +204,12 @@ async function renderBeranda() {
     <div class="grid-2">
       <div class="kartu">
         <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Ketidakhadiran Tanpa Keterangan (Alpha)</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Dijumlah dari seluruh batch yang tercatat</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Dijumlah dari batch tahun ${data.tahun_ditampilkan} · tahun lain bisa dilihat di Visualisasi</p>
         <div class="scroll-list" id="rekapAlphaBeranda"></div>
       </div>
       <div class="kartu">
         <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Keterlambatan Masuk Kerja</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Dijumlah dari seluruh batch yang tercatat</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Dijumlah dari batch tahun ${data.tahun_ditampilkan} · tahun lain bisa dilihat di Visualisasi</p>
         <div class="scroll-list" id="rekapTerlambatBeranda"></div>
       </div>
     </div>
@@ -445,7 +445,16 @@ async function renderProses() {
 
     let jumlahBerhasil = 0;
     let jumlahBermasalah = 0;
-    const waktuMulai = Date.now();
+    // PERBAIKAN (1 Agu 2026): dulu "Sisa Waktu" dihitung dari rata-rata
+    // SEJAK AWAL BATCH (total waktu berjalan / jumlah file selesai) - kalau
+    // file pertama kebetulan lambat (mis. koneksi belum "panas") atau
+    // jaringan sempat melambat di tengah lalu pulih, rata-rata itu jadi
+    // bias ke masa lalu dan tidak mencerminkan kecepatan SAAT INI. Sekarang
+    // dipakai rolling window: rata-rata cuma dari beberapa file TERAKHIR
+    // (bukan seluruhnya), jadi kalau kecepatan berubah di tengah jalan,
+    // perkiraan sisa waktu langsung menyesuaikan mengikuti kondisi terkini.
+    const JENDELA_RATA_RATA = 10;
+    const durasiFileTerakhir = [];
 
     try {
       // 1) buat batch kosong dulu
@@ -460,6 +469,7 @@ async function renderProses() {
       const total = filesTerpilih.length;
       for (let i = 0; i < total; i++) {
         const file = filesTerpilih[i];
+        const waktuMulaiFileIni = Date.now();
         progresLabel.textContent = `Memindai: ${file.name}`;
         const baris = document.querySelector(`[data-file-row="${i}"]`);
         if (baris) baris.style.background = "#FBF3DC";
@@ -470,6 +480,9 @@ async function renderProses() {
         fileForm.append("nama_bidang", document.getElementById("inputBidang").value.trim());
         const fileRes = await fetch("/api/proses/file", { method: "POST", body: fileForm });
         const fileData = await ambilJsonAtauLempar(fileRes);
+
+        durasiFileTerakhir.push(Date.now() - waktuMulaiFileIni);
+        if (durasiFileTerakhir.length > JENDELA_RATA_RATA) durasiFileTerakhir.shift();
 
         const bermasalah = !!fileData.bermasalah;
         if (baris) baris.style.background = bermasalah ? "#FBE6E1" : "#E4F0E6";
@@ -487,7 +500,7 @@ async function renderProses() {
         progresRingFill.setAttribute("stroke-dashoffset", `${KELILING_CINCIN * (1 - persen / 100)}`);
         perbaruiDenganPop(statDiproses, `${i + 1}/${total}`);
 
-        const rataRataPerFile = (Date.now() - waktuMulai) / (i + 1);
+        const rataRataPerFile = durasiFileTerakhir.reduce((a, b) => a + b, 0) / durasiFileTerakhir.length;
         const sisaFile = total - (i + 1);
         statSisaWaktu.textContent = sisaFile === 0 ? "Selesai" : formatDurasiSisa(rataRataPerFile * sisaFile);
 
@@ -542,16 +555,25 @@ function formatDurasiSisa(ms) {
   return `~${menit}m ${sisaDetik}d`;
 }
 
-// Set teks elemen + picu animasi "pop" (lihat @keyframes popNilai di style.css).
-// Untuk .proses-persen, animasinya langsung di elemen itu sendiri; untuk
-// kartu statistik (.proses-stat > span), animasinya di elemen INDUK supaya
-// cocok dengan selector CSS ".proses-stat.pop span".
+// Set teks elemen + putar animasi "pop" singkat (scale up-down) memakai
+// Web Animations API. PERBAIKAN (1 Agu 2026): dulu pakai trik "toggle
+// class + void offsetWidth" untuk mengulang animasi CSS tiap kali
+// dipanggil - itu MEMAKSA REFLOW SINKRON di setiap panggilan (dipanggil
+// ~3x per file: persentase, diproses, berhasil/bermasalah), jadi untuk
+// batch besar (puluhan-ratusan file) reflow itu menumpuk jadi beban nyata
+// dan bikin proses terasa lebih berat/lambat dari seharusnya. element.
+// animate() tidak butuh reflow paksa sama sekali - hasil visualnya identik,
+// jauh lebih ringan.
+const HORMATI_REDUCE_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 function perbaruiDenganPop(el, teksBaru) {
   el.textContent = teksBaru;
+  if (HORMATI_REDUCE_MOTION) return;
   const target = el.classList.contains("proses-persen") ? el : el.parentElement;
-  target.classList.remove("pop");
-  void target.offsetWidth; // paksa reflow supaya animasi bisa diulang tiap kali dipanggil
-  target.classList.add("pop");
+  target.animate(
+    [{ transform: "scale(1)" }, { transform: "scale(1.2)" }, { transform: "scale(1)" }],
+    { duration: 340, easing: "cubic-bezier(.34,1.56,.64,1)" }
+  );
 }
 
 async function ambilJsonAtauLempar(res) {
@@ -1090,6 +1112,23 @@ const WARNA_LAINNYA = "#CBD5E1"; // fallback untuk label tak dikenal (mis. data 
 async function renderVisualisasi() {
   const [batches, jumlahRiil] = await Promise.all([api("/api/batches"), api("/api/pengaturan/jumlah_pegawai_riil")]);
 
+  // FITUR BARU (1 Agu 2026): dulu cuma ada "Seluruh Batch (akumulasi)" -
+  // yang berarti SEMUA batch sejak sistem dipakai pertama kali, tanpa
+  // jenjang. Makin lama dipakai (lintas bulan bahkan tahun), angka itu
+  // akan terus menumpuk dan makin kurang bermakna untuk dibandingkan
+  // (mis. "akumulasi" tahun ini tercampur dengan tahun lalu). Sekarang
+  // dropdown dikelompokkan PER TAHUN, dengan opsi "Tahun X (akumulasi)"
+  // di awal tiap kelompok - jadi ada jenjang: 1 batch -> akumulasi 1 tahun
+  // -> akumulasi seluruh sejarah (opsi paling atas, tetap ada untuk yang
+  // memang butuh gambaran total keseluruhan).
+  const batchPerTahun = {};
+  batches.forEach((b) => {
+    const tahun = (b.periode_akhir || b.dibuat_pada || "").slice(0, 4) || "Tanpa periode";
+    batchPerTahun[tahun] = batchPerTahun[tahun] || [];
+    batchPerTahun[tahun].push(b);
+  });
+  const daftarTahun = Object.keys(batchPerTahun).sort((a, b) => b.localeCompare(a));
+
   content.innerHTML = `
     <p style="font-size:16px;font-weight:700;margin:0 0 14px" class="judul-serif">${ICONS.chart} Visualisasi</p>
 
@@ -1097,10 +1136,18 @@ async function renderVisualisasi() {
       <p class="stat-label" style="font-weight:600;margin-bottom:10px">${ICONS.filter} Filter Data</p>
       <div class="filter-bar">
         <div>
-          <label>Pilih Batch</label>
+          <label>Pilih Batch / Periode</label>
           <select id="filterBatch">
-            <option value="all">Seluruh Batch (akumulasi)</option>
-            ${batches.map((b) => `<option value="${b.id}">${b.label} · ${b.nama_bidang || "campuran"}</option>`).join("")}
+            <option value="all">Seluruh Batch (akumulasi total)</option>
+            ${daftarTahun
+              .map(
+                (tahun) => `
+              <optgroup label="${tahun}">
+                ${tahun !== "Tanpa periode" ? `<option value="tahun:${tahun}">— Tahun ${tahun} (akumulasi) —</option>` : ""}
+                ${batchPerTahun[tahun].map((b) => `<option value="${b.id}">${b.label} · ${b.nama_bidang || "campuran"}</option>`).join("")}
+              </optgroup>`
+              )
+              .join("")}
           </select>
         </div>
       </div>
@@ -1170,13 +1217,20 @@ async function editJumlahPegawaiRiil() {
 }
 
 async function muatDataVisualisasi() {
-  const idBatch = document.getElementById("filterBatch").value;
-  const mode = idBatch !== "all" ? "batch" : "all";
-  const value = idBatch !== "all" ? idBatch : "";
+  const nilaiTerpilih = document.getElementById("filterBatch").value;
+  const labelTerpilih = document.getElementById("filterBatch").selectedOptions[0].textContent;
 
-  const labelBatch = idBatch === "all"
-    ? "Seluruh Batch (akumulasi)"
-    : document.getElementById("filterBatch").selectedOptions[0].textContent;
+  let mode = "all";
+  let value = "";
+  if (nilaiTerpilih.startsWith("tahun:")) {
+    mode = "tahun";
+    value = nilaiTerpilih.replace("tahun:", "");
+  } else if (nilaiTerpilih !== "all") {
+    mode = "batch";
+    value = nilaiTerpilih;
+  }
+
+  const labelBatch = nilaiTerpilih === "all" ? "Seluruh Batch (akumulasi total)" : labelTerpilih;
 
   document.getElementById("konteksBanner").innerHTML = `Menampilkan data: <b>${labelBatch}</b>`;
   document.getElementById("labelDonut").textContent = `(${labelBatch})`;
@@ -1564,17 +1618,25 @@ async function renderLogAktivitas() {
     <p style="font-size:16px;font-weight:700;margin:0 0 14px" class="judul-serif">Log Aktivitas</p>
     <div class="tabel-wrap">
       <div class="tabel-header-baris" style="grid-template-columns:1fr 1.3fr 1fr 1fr 1fr">
-        <span>WAKTU</span><span>PEGAWAI</span><span>FIELD</span><span>SEBELUM</span><span>SESUDAH</span>
+        <span>WAKTU</span><span>PEGAWAI / BATCH</span><span>AKTIVITAS</span><span>SEBELUM</span><span>SESUDAH</span>
       </div>
       ${
         log.length
           ? log
-              .map(
-                (l) => `<div class="tabel-baris" style="grid-template-columns:1fr 1.3fr 1fr 1fr 1fr">
-              <span>${formatWaktu(l.diubah_pada)}</span><span>${l.nama_pegawai}</span><span>${l.field_diubah}</span>
+              .map((l) => {
+                // FITUR BARU (1 Agu 2026): baris aktivitas level-batch
+                // (Upload/Hapus Batch, record_table='batch') ditandai beda
+                // dari edit field biasa - ikon + warna latar lembut, dan
+                // kolom "PEGAWAI" diisi nama batch-nya (bukan nama pegawai,
+                // karena aktivitas ini bukan tentang satu pegawai tertentu).
+                const isAktivitasBatch = l.record_table === "batch";
+                const ikon = l.field_diubah === "Upload Batch" ? "⬆️" : l.field_diubah === "Hapus Batch" ? "🗑️" : "";
+                const kolomKedua = isAktivitasBatch ? `${ikon} ${l.batch_label || "(batch tidak diketahui)"}` : l.nama_pegawai;
+                return `<div class="tabel-baris" style="grid-template-columns:1fr 1.3fr 1fr 1fr 1fr;${isAktivitasBatch ? "background:var(--biru-muda-bg)" : ""}">
+              <span>${formatWaktu(l.diubah_pada)}</span><span>${kolomKedua}</span><span>${l.field_diubah}</span>
               <span style="color:var(--merah-teks)">${l.nilai_lama || "-"}</span><span style="color:var(--hijau-status-teks)">${l.nilai_baru}</span>
-            </div>`
-              )
+            </div>`;
+              })
               .join("")
           : `<div style="padding:16px;font-size:12.5px;color:var(--teks-muted);font-style:italic">Belum ada perubahan tercatat.</div>`
       }
