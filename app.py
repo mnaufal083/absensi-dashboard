@@ -123,28 +123,31 @@ def index():
 @app.route("/api/ringkasan-beranda")
 @login_required
 def ringkasan_beranda():
+    # FITUR BARU (1 Agu 2026): "Total batch" & "Perlu ditinjau" tetap GLOBAL
+    # (status operasional sistem saat ini, wajar tidak berubah oleh periode)
+    # tapi "Pegawai terekap" & kedua ranking Alpha/Terlambat sekarang sama-
+    # sama ikut satu filter periode (mode/value dari query string), default
+    # ke tahun berjalan seperti sebelumnya. Dulu "Pegawai terekap" dihitung
+    # terpisah (jumlah semua batch sepanjang sejarah) sehingga tidak
+    # konsisten dengan 2 kartu ranking di bawahnya yang sudah dibatasi
+    # tahun berjalan - sekarang ketiganya konsisten pakai statistik_ringkas
+    # yang sama, dengan filter yang sama.
+    mode = request.args.get("filter_mode", "tahun")
+    value = request.args.get("filter_value") or str(datetime.now().year)
+
     semua = db.daftar_batch()
     total_batch = len(semua)
     perlu_ditinjau = len([b for b in semua if b["status"] == "draft"])
-    total_pegawai = sum(b.get("jumlah_pegawai", 0) for b in semua)
     aktivitas = db.log_aktivitas(limit=8)
+    statistik = db.statistik_ringkas(mode, value)
 
-    # PERBAIKAN (1 Agu 2026): dulu ranking Alpha/Terlambat di Beranda selalu
-    # akumulasi SEMUA batch sejak sistem dipakai pertama kali (mode="all"),
-    # jadi makin lama dipakai (lintas bulan/tahun) angkanya terus menumpuk
-    # dan makin kurang mencerminkan kondisi TERKINI. Beranda sekarang
-    # dilingkupi tahun berjalan saja - untuk lihat akumulasi lintas tahun
-    # atau tahun-tahun sebelumnya, itu sudah bisa lewat filter Tahun di
-    # halaman Visualisasi.
-    tahun_ini = str(datetime.now().year)
     return jsonify({
         "total_batch": total_batch,
         "perlu_ditinjau": perlu_ditinjau,
-        "total_pegawai": total_pegawai,
+        "total_pegawai": statistik["total_pegawai"],
         "aktivitas_terbaru": aktivitas,
-        "tahun_ditampilkan": tahun_ini,
-        "ranking_alpha": db.ranking_pegawai("alpha", "tahun", tahun_ini, limit=15),
-        "ranking_terlambat": db.ranking_pegawai("terlambat", "tahun", tahun_ini, limit=15),
+        "ranking_alpha": db.ranking_pegawai("alpha", mode, value, limit=15),
+        "ranking_terlambat": db.ranking_pegawai("terlambat", mode, value, limit=15),
     })
 
 
@@ -497,7 +500,9 @@ def api_riwayat_pegawai(nip):
 @app.route("/api/log-aktivitas")
 @login_required
 def api_log_aktivitas():
-    return jsonify(db.log_aktivitas(limit=200))
+    limit = request.args.get("limit", 50, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    return jsonify(db.log_aktivitas(limit=limit, offset=offset))
 
 
 # ---------------------------------------------------------------------------

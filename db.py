@@ -463,8 +463,19 @@ def edit_field(batch_id, record_table, record_id, field, nilai_baru, user_id):
 # ---------------------------------------------------------------------------
 # LOG AKTIVITAS (lintas batch) & CARI PEGAWAI
 # ---------------------------------------------------------------------------
-def log_aktivitas(limit=100):
-    return supabase.table("record_edit_log").select("*").order("diubah_pada", desc=True).limit(limit).execute().data
+def log_aktivitas(limit=100, offset=0):
+    """FITUR BARU (1 Agu 2026): dulu hard cap 200 entri terbaru tanpa cara
+    melihat yang lebih lama - sekarang mendukung offset supaya frontend
+    bisa "muat lebih banyak" secara bertahap, bukan mentok di satu batas."""
+    akhir = offset + limit - 1
+    return (
+        supabase.table("record_edit_log")
+        .select("*")
+        .order("diubah_pada", desc=True)
+        .range(offset, akhir)
+        .execute()
+        .data
+    )
 
 
 # ---------------------------------------------------------------------

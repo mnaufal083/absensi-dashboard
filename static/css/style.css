@@ -149,29 +149,111 @@ button {
 }
 .btn-keluar:hover { background: var(--biru-muda-tepi); }
 
-.layout { display: flex; height: calc(100vh - 60px); overflow: hidden; }
+/* Tombol hamburger - disembunyikan di layar lebar, cuma muncul di mobile (lihat media query di bawah) */
+.btn-hamburger {
+  display: none; background: none; border: none; color: var(--teks-utama); cursor: pointer;
+  padding: 6px; border-radius: 8px; flex-shrink: 0;
+}
+.btn-hamburger:hover { background: var(--abu-bg); }
+
+/* -----------------------------------------------------------------------
+   SIDEBAR: COLLAPSE (desktop) + MODE LACI/SWIPE (mobile) — FITUR BARU
+   (1 Agu 2026). Sebelumnya sidebar 100% statis (lebar 200px tetap, tanpa
+   satu pun media query), jadi tampilannya monoton dan tidak menyesuaikan
+   perangkat. Sekarang:
+   - Desktop: tombol "Ciutkan menu" di bagian bawah sidebar menciutkannya
+     jadi ikon saja (class .collapsed di #sidebar), lebar konten jadi lebih
+     luas. Preferensi disimpan di localStorage (lihat dashboard.js), jadi
+     tetap konsisten setelah reload.
+   - Mobile (<=880px): sidebar berubah jadi LACI yang menggeser dari kiri
+     (position:fixed, translateX), disembunyikan secara default. Dibuka
+     lewat tombol hamburger di topbar ATAU swipe dari tepi kiri layar
+     (logic swipe ada di dashboard.js), ditutup lewat tombol yang sama,
+     tap di area gelap (backdrop), atau swipe ke kiri.
+----------------------------------------------------------------------- */
+.layout { display: flex; height: calc(100vh - 60px); overflow: hidden; position: relative; }
 .sidebar {
   width: 200px; flex-shrink: 0; background: var(--kartu-bg); border-right: 1px solid var(--border);
   padding: 10px 0; display: flex; flex-direction: column; gap: 1px;
-  height: 100%; overflow-y: auto;
+  height: 100%; overflow-y: auto; overflow-x: hidden;
+  transition: width .22s ease;
 }
-.nav-btn {
+.nav-btn, .nav-btn-collapse {
   display: flex; align-items: center; gap: 10px; text-align: left;
   background: transparent; color: var(--teks-sekunder); border-left: 3px solid transparent;
-  border-radius: 0; padding: 10px 16px; font-size: 13px; font-weight: 500;
+  border-radius: 0; padding: 10px 16px; font-size: 13px; font-weight: 500; white-space: nowrap;
   transition: background-color .15s ease, color .15s ease, border-color .15s ease;
 }
 .nav-btn .ikon { color: var(--teks-muted); transition: color .15s ease; }
 .nav-btn.active { background: var(--biru-muda-bg); color: var(--biru); border-left-color: var(--biru); font-weight: 600; }
 .nav-btn.active .ikon { color: var(--biru); }
 .nav-btn:not(.active):hover { background: var(--abu-bg); color: var(--teks-utama); }
+
+.nav-btn-collapse {
+  margin-top: auto; border-top: 1px solid var(--border); color: var(--teks-muted); cursor: pointer;
+}
+.nav-btn-collapse:hover { background: var(--abu-bg); color: var(--teks-utama); }
+.nav-btn-collapse .ikon { transition: transform .22s ease; }
+
+/* Mode ciutkan (desktop): lebar menyempit jadi cuma muat ikon, label disembunyikan */
+.sidebar.collapsed { width: 60px; }
+.sidebar.collapsed .nav-label { display: none; }
+.sidebar.collapsed .nav-btn, .sidebar.collapsed .nav-btn-collapse { justify-content: center; padding-left: 0; padding-right: 0; }
+.sidebar.collapsed #ikonCollapse { transform: rotate(180deg); }
+
+.sidebar-backdrop {
+  display: none; position: fixed; inset: 0; background: rgba(15,23,42,.45);
+  z-index: 40; opacity: 0; transition: opacity .25s ease;
+}
+.sidebar-backdrop.tampil { display: block; opacity: 1; }
+
 .content {
-  flex: 1; padding: 1.25rem 1.75rem; overflow-y: auto; height: 100%;
+  flex: 1; padding: 1.25rem 1.75rem; overflow-y: auto; height: 100%; min-width: 0;
 }
 .content.animasi-masuk { animation: masukKonten .25s ease; }
 @keyframes masukKonten {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===========================================================================
+   RESPONSIF — MOBILE & TABLET (<=880px)
+   =========================================================================== */
+@media (max-width: 880px) {
+  .btn-hamburger { display: inline-flex; align-items: center; justify-content: center; }
+  .brand-eyebrow { display: none; } /* subjudul disembunyikan, hemat ruang di layar sempit */
+  .topbar { padding: 10px 12px; }
+  .topbar-right span#userEmail { display: none; } /* email disembunyikan di layar sangat sempit, cuma titik online + tombol keluar */
+
+  .sidebar {
+    position: fixed; top: 0; left: 0; z-index: 50;
+    width: 240px; height: 100%; padding-top: 60px; /* beri ruang untuk topbar yang tetap terlihat di atasnya */
+    transform: translateX(-100%);
+    transition: transform .28s cubic-bezier(.4,0,.2,1);
+    box-shadow: 8px 0 24px -8px rgba(15,23,42,.25);
+  }
+  .sidebar.mobile-terbuka { transform: translateX(0); }
+  /* Di mobile, tombol "Ciutkan" tidak relevan (laci sudah otomatis
+     tersembunyi kalau tidak dibuka) - disembunyikan supaya tidak
+     membingungkan dengan 2 mekanisme buka-tutup sekaligus. */
+  .sidebar.collapsed { width: 240px; }
+  .sidebar.collapsed .nav-label { display: inline; }
+  .nav-btn-collapse { display: none; }
+
+  .content { padding: 1rem; }
+
+  /* Grid statistik/kartu otomatis jadi 1 kolom di layar sempit */
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr !important; }
+
+  /* Tabel dengan kolom tetap (grid-template-columns custom lewat inline
+     style) tidak realistis dipaksa muat di layar sempit - dibuat bisa
+     digeser ke samping (scroll horizontal) alih-alih data terpotong/
+     bertumpuk tidak terbaca. */
+  .tabel-wrap { overflow-x: auto; }
+  .tabel-header-baris, .tabel-baris { min-width: 560px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .sidebar-backdrop, .nav-btn-collapse .ikon { transition: none !important; }
 }
 
 /* --- Subtab (Data Harian / Ringkasan Pegawai / Log Berkas Bermasalah) ---

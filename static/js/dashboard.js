@@ -49,7 +49,10 @@ const currentUserId = document.body.dataset.userId || null;
 // ROUTING SIDEBAR
 // ---------------------------------------------------------------------
 document.querySelectorAll(".nav-btn").forEach((btn) => {
-  btn.addEventListener("click", () => gotoTab(btn.dataset.tab));
+  btn.addEventListener("click", () => {
+    gotoTab(btn.dataset.tab);
+    tutupLaciMobile(); // di mobile, pilih menu otomatis menutup laci
+  });
 });
 
 function gotoTab(name) {
@@ -71,6 +74,89 @@ function gotoTab(name) {
   content.innerHTML = '<p class="loading-text">Memuat...</p>';
   (loaders[name] || renderBeranda)();
 }
+
+// -----------------------------------------------------------------------
+// SIDEBAR RESPONSIF — FITUR BARU (1 Agu 2026)
+// 1) Desktop: tombol "Ciutkan menu" -> sidebar jadi ikon saja, preferensi
+//    disimpan di localStorage (pola sama seperti pengaturan tema).
+// 2) Mobile (<=880px, lihat media query di style.css): sidebar jadi laci
+//    yang bisa dibuka lewat tombol hamburger DI TOPBAR atau lewat SWIPE
+//    dari tepi kiri layar, dan ditutup lewat tombol yang sama, tap di
+//    area gelap (backdrop), atau swipe ke kiri.
+// -----------------------------------------------------------------------
+const sidebarEl = document.getElementById("sidebar");
+const backdropEl = document.getElementById("sidebarBackdrop");
+const btnCollapse = document.getElementById("btnCollapseSidebar");
+const btnHamburger = document.getElementById("btnHamburger");
+
+// --- 1) Collapse (desktop) ---
+if (localStorage.getItem("sidebarCiut") === "1") sidebarEl.classList.add("collapsed");
+btnCollapse.addEventListener("click", () => {
+  const ciut = sidebarEl.classList.toggle("collapsed");
+  localStorage.setItem("sidebarCiut", ciut ? "1" : "0");
+});
+
+// --- 2) Buka/tutup laci (mobile) ---
+function bukaLaciMobile() {
+  sidebarEl.classList.add("mobile-terbuka");
+  backdropEl.classList.add("tampil");
+}
+function tutupLaciMobile() {
+  sidebarEl.classList.remove("mobile-terbuka");
+  backdropEl.classList.remove("tampil");
+}
+function toggleLaciMobile() {
+  sidebarEl.classList.contains("mobile-terbuka") ? tutupLaciMobile() : bukaLaciMobile();
+}
+btnHamburger.addEventListener("click", toggleLaciMobile);
+backdropEl.addEventListener("click", tutupLaciMobile);
+
+// --- 3) Swipe gesture (mobile) ---
+// Swipe ke KANAN mulai dari dekat tepi kiri layar -> buka laci.
+// Swipe ke KIRI di mana pun saat laci terbuka -> tutup laci.
+// Hanya aktif kalau lebar layar masuk breakpoint mobile (biar tidak
+// mengganggu gesture normal di desktop, mis. drag teks/seleksi).
+(function pasangSwipeSidebar() {
+  let xMulai = null, yMulai = null, waktuMulai = 0;
+  const AMBANG_MOBILE = 880;
+  const JARAK_MINIMAL = 55; // px, supaya tidak ke-trigger oleh tap/scroll biasa
+
+  document.addEventListener(
+    "touchstart",
+    (e) => {
+      if (window.innerWidth > AMBANG_MOBILE) return;
+      const t = e.touches[0];
+      xMulai = t.clientX;
+      yMulai = t.clientY;
+      waktuMulai = Date.now();
+    },
+    { passive: true }
+  );
+
+  document.addEventListener(
+    "touchend",
+    (e) => {
+      if (xMulai === null || window.innerWidth > AMBANG_MOBILE) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - xMulai;
+      const dy = t.clientY - yMulai;
+      const durasi = Date.now() - waktuMulai;
+      xMulai = null;
+
+      // Abaikan kalau geraknya lebih vertikal daripada horizontal (itu scroll biasa)
+      if (Math.abs(dy) > Math.abs(dx)) return;
+      if (durasi > 600) return; // swipe harus cukup cepat, bukan drag pelan
+
+      const laciTerbuka = sidebarEl.classList.contains("mobile-terbuka");
+      if (!laciTerbuka && dx > JARAK_MINIMAL) {
+        bukaLaciMobile();
+      } else if (laciTerbuka && dx < -JARAK_MINIMAL) {
+        tutupLaciMobile();
+      }
+    },
+    { passive: true }
+  );
+})();
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -161,24 +247,45 @@ function optionsKeterangan(list, terpilih) {
 // BERANDA
 // ---------------------------------------------------------------------
 async function renderBeranda() {
-  const data = await api("/api/ringkasan-beranda");
-  const aktivitas = (data.aktivitas_terbaru || [])
-    .map(
-      (a) => `<div class="tabel-baris" style="grid-template-columns:2fr 1fr">
-        <span>${a.diubah_oleh || "admin"} mengubah <b>${a.field_diubah}</b> pada ${a.nama_pegawai}</span>
-        <span style="color:var(--teks-muted);text-align:right">${formatWaktu(a.diubah_pada)}</span>
-      </div>`
-    )
-    .join("") || `<p class="loading-text" style="padding:14px">Belum ada aktivitas.</p>`;
+  const tahunSekarang = String(new Date().getFullYear());
+  const [data, batches] = await Promise.all([
+    api(`/api/ringkasan-beranda?filter_mode=tahun&filter_value=${tahunSekarang}`),
+    api("/api/batches"),
+  ]);
+  const aktivitas = renderPotonganAktivitas(data.aktivitas_terbaru);
+
+  // FITUR BARU (1 Agu 2026): dropdown periode dikelompokkan per tahun -
+  // sama seperti di Visualisasi - supaya "Pegawai terekap" & kedua ranking
+  // di bawah bisa dilihat per tahun tertentu, atau per batch/periode
+  // (biasanya ~1 bulan) tertentu, bukan cuma terpaku ke tahun berjalan.
+  const batchPerTahun = {};
+  batches.forEach((b) => {
+    const tahun = (b.periode_akhir || b.dibuat_pada || "").slice(0, 4) || "Tanpa periode";
+    batchPerTahun[tahun] = batchPerTahun[tahun] || [];
+    batchPerTahun[tahun].push(b);
+  });
+  const daftarTahun = Object.keys(batchPerTahun).sort((a, b) => b.localeCompare(a));
+  const opsiPeriode = `
+    <option value="all">Semua data (akumulasi total)</option>
+    ${daftarTahun
+      .map(
+        (tahun) => `
+      <optgroup label="${tahun}">
+        ${tahun !== "Tanpa periode" ? `<option value="tahun:${tahun}" ${tahun === tahunSekarang ? "selected" : ""}>— Tahun ${tahun} (akumulasi) —</option>` : ""}
+        ${batchPerTahun[tahun].map((b) => `<option value="${b.id}">${b.label} · ${b.nama_bidang || "campuran"}</option>`).join("")}
+      </optgroup>`
+      )
+      .join("")}
+  `;
 
   content.innerHTML = `
     <p style="font-size:17px;font-weight:700;margin:0 0 4px" class="judul-serif">Selamat datang</p>
     <p style="font-size:12.5px;color:var(--teks-sekunder);margin:0 0 18px">Ringkasan aktivitas rekapitulasi absensi</p>
 
     <div class="grid-3" style="margin-bottom:18px">
-      <div class="kartu"><p class="stat-label">Total batch</p><p class="stat-angka">${data.total_batch}</p></div>
-      <div class="kartu"><p class="stat-label">Perlu ditinjau</p><p class="stat-angka" style="color:var(--merah-teks)">${data.perlu_ditinjau}</p></div>
-      <div class="kartu"><p class="stat-label">Pegawai terekap</p><p class="stat-angka">${data.total_pegawai}</p></div>
+      <div class="kartu"><p class="stat-label">Total batch</p><p class="stat-angka">${data.total_batch}</p><p style="font-size:10.5px;color:var(--teks-muted);margin:2px 0 0">seluruh waktu</p></div>
+      <div class="kartu"><p class="stat-label">Perlu ditinjau</p><p class="stat-angka" style="color:var(--merah-teks)">${data.perlu_ditinjau}</p><p style="font-size:10.5px;color:var(--teks-muted);margin:2px 0 0">seluruh waktu</p></div>
+      <div class="kartu"><p class="stat-label">Pegawai terekap</p><p class="stat-angka" id="berandaTotalPegawai">${data.total_pegawai}</p><p style="font-size:10.5px;color:var(--teks-muted);margin:2px 0 0" id="berandaLabelPeriode">tahun ${tahunSekarang}</p></div>
     </div>
 
     <div class="kartu">
@@ -201,15 +308,20 @@ async function renderBeranda() {
       ${aktivitas}
     </div>
 
+    <div class="kartu" style="margin-bottom:14px">
+      <label style="font-size:11.5px;color:var(--teks-sekunder);font-weight:600;display:block;margin-bottom:5px">Periode untuk "Pegawai Terekap" &amp; rekapitulasi di bawah</label>
+      <select id="berandaFilterPeriode" style="max-width:340px">${opsiPeriode}</select>
+    </div>
+
     <div class="grid-2">
       <div class="kartu">
         <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Ketidakhadiran Tanpa Keterangan (Alpha)</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Dijumlah dari batch tahun ${data.tahun_ditampilkan} · tahun lain bisa dilihat di Visualisasi</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px" id="berandaLabelAlpha">Dijumlah dari tahun ${tahunSekarang}</p>
         <div class="scroll-list" id="rekapAlphaBeranda"></div>
       </div>
       <div class="kartu">
         <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Keterlambatan Masuk Kerja</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Dijumlah dari batch tahun ${data.tahun_ditampilkan} · tahun lain bisa dilihat di Visualisasi</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px" id="berandaLabelTerlambat">Dijumlah dari tahun ${tahunSekarang}</p>
         <div class="scroll-list" id="rekapTerlambatBeranda"></div>
       </div>
     </div>
@@ -222,6 +334,40 @@ async function renderBeranda() {
 
   renderTabelRekap("rekapAlphaBeranda", data.ranking_alpha || []);
   renderTabelRekap("rekapTerlambatBeranda", data.ranking_terlambat || []);
+
+  document.getElementById("berandaFilterPeriode").addEventListener("change", async (e) => {
+    const nilai = e.target.value;
+    const labelTerpilih = e.target.selectedOptions[0].textContent;
+    let mode = "all";
+    let value = "";
+    if (nilai.startsWith("tahun:")) {
+      mode = "tahun";
+      value = nilai.replace("tahun:", "");
+    } else if (nilai !== "all") {
+      mode = "batch";
+      value = nilai;
+    }
+    const label = nilai === "all" ? "seluruh data" : labelTerpilih;
+
+    const ulang = await api(`/api/ringkasan-beranda?filter_mode=${mode}&filter_value=${encodeURIComponent(value)}`);
+    document.getElementById("berandaTotalPegawai").textContent = ulang.total_pegawai;
+    document.getElementById("berandaLabelPeriode").textContent = label;
+    document.getElementById("berandaLabelAlpha").textContent = `Dijumlah dari ${label}`;
+    document.getElementById("berandaLabelTerlambat").textContent = `Dijumlah dari ${label}`;
+    renderTabelRekap("rekapAlphaBeranda", ulang.ranking_alpha || []);
+    renderTabelRekap("rekapTerlambatBeranda", ulang.ranking_terlambat || []);
+  });
+}
+
+function renderPotonganAktivitas(daftar) {
+  return (daftar || [])
+    .map(
+      (a) => `<div class="tabel-baris" style="grid-template-columns:2fr 1fr">
+        <span>${a.diubah_oleh || "admin"} mengubah <b>${a.field_diubah}</b> pada ${a.nama_pegawai}</span>
+        <span style="color:var(--teks-muted);text-align:right">${formatWaktu(a.diubah_pada)}</span>
+      </div>`
+    )
+    .join("") || `<p class="loading-text" style="padding:14px">Belum ada aktivitas.</p>`;
 }
 
 function formatWaktu(iso) {
@@ -1612,36 +1758,81 @@ function renderBarPerBidang(batches) {
 // ---------------------------------------------------------------------
 // LOG AKTIVITAS (global)
 // ---------------------------------------------------------------------
+let logAktivitasState = { semua: [], offset: 0, ukuranHalaman: 50, masihAda: true };
+
 async function renderLogAktivitas() {
-  const log = await api("/api/log-aktivitas");
+  logAktivitasState = { semua: [], offset: 0, ukuranHalaman: 50, masihAda: true };
   content.innerHTML = `
     <p style="font-size:16px;font-weight:700;margin:0 0 14px" class="judul-serif">Log Aktivitas</p>
+    <div class="kartu" style="margin-bottom:12px">
+      <input type="text" id="cariLogAktivitas" placeholder="Cari nama pegawai, batch, field, atau admin..." style="width:100%" />
+    </div>
     <div class="tabel-wrap">
       <div class="tabel-header-baris" style="grid-template-columns:1fr 1.3fr 1fr 1fr 1fr">
         <span>WAKTU</span><span>PEGAWAI / BATCH</span><span>AKTIVITAS</span><span>SEBELUM</span><span>SESUDAH</span>
       </div>
-      ${
-        log.length
-          ? log
-              .map((l) => {
-                // FITUR BARU (1 Agu 2026): baris aktivitas level-batch
-                // (Upload/Hapus Batch, record_table='batch') ditandai beda
-                // dari edit field biasa - ikon + warna latar lembut, dan
-                // kolom "PEGAWAI" diisi nama batch-nya (bukan nama pegawai,
-                // karena aktivitas ini bukan tentang satu pegawai tertentu).
-                const isAktivitasBatch = l.record_table === "batch";
-                const ikon = l.field_diubah === "Upload Batch" ? "⬆️" : l.field_diubah === "Hapus Batch" ? "🗑️" : "";
-                const kolomKedua = isAktivitasBatch ? `${ikon} ${l.batch_label || "(batch tidak diketahui)"}` : l.nama_pegawai;
-                return `<div class="tabel-baris" style="grid-template-columns:1fr 1.3fr 1fr 1fr 1fr;${isAktivitasBatch ? "background:var(--biru-muda-bg)" : ""}">
+      <!-- FITUR BARU (1 Agu 2026): dulu daftar log dirender rata tanpa
+           batas tinggi - kalau aktivitasnya banyak (apalagi sekarang
+           Upload/Hapus Batch ikut tercatat), seluruh HALAMAN yang jadi
+           panjang & harus discroll, bukan kotak kecil ini. Sekarang
+           dikurung dalam kotak scroll setinggi 60vh, dan ada tombol
+           "muat lebih banyak" di bawahnya - bukan hard cap 200 tanpa
+           cara melihat yang lebih lama lagi. -->
+      <div id="isiLogAktivitas" style="max-height:60vh;overflow-y:auto"></div>
+    </div>
+    <div style="text-align:center;margin-top:10px">
+      <button class="btn-sekunder" id="btnMuatLagiLog">Muat lebih banyak</button>
+      <p id="infoLogAktivitas" style="font-size:11.5px;color:var(--teks-muted);margin:6px 0 0"></p>
+    </div>
+  `;
+  document.getElementById("cariLogAktivitas").addEventListener("input", (e) => renderIsiLogAktivitas(e.target.value));
+  document.getElementById("btnMuatLagiLog").addEventListener("click", muatLagiLogAktivitas);
+  await muatLagiLogAktivitas();
+}
+
+async function muatLagiLogAktivitas() {
+  const btn = document.getElementById("btnMuatLagiLog");
+  btn.disabled = true;
+  btn.textContent = "Memuat...";
+  const halamanBaru = await api(`/api/log-aktivitas?limit=${logAktivitasState.ukuranHalaman}&offset=${logAktivitasState.offset}`);
+  logAktivitasState.semua = logAktivitasState.semua.concat(halamanBaru);
+  logAktivitasState.offset += halamanBaru.length;
+  logAktivitasState.masihAda = halamanBaru.length === logAktivitasState.ukuranHalaman;
+  btn.disabled = false;
+  btn.textContent = "Muat lebih banyak";
+  btn.style.display = logAktivitasState.masihAda ? "inline-block" : "none";
+  document.getElementById("infoLogAktivitas").textContent = logAktivitasState.masihAda
+    ? `${logAktivitasState.semua.length} aktivitas dimuat - masih mungkin ada yang lebih lama`
+    : `${logAktivitasState.semua.length} aktivitas - ini semuanya, tidak ada lagi yang lebih lama`;
+  renderIsiLogAktivitas(document.getElementById("cariLogAktivitas").value);
+}
+
+function renderIsiLogAktivitas(kataKunci) {
+  const kunci = (kataKunci || "").trim().toLowerCase();
+  const log = !kunci
+    ? logAktivitasState.semua
+    : logAktivitasState.semua.filter((l) =>
+        `${l.nama_pegawai} ${l.batch_label || ""} ${l.field_diubah} ${l.diubah_oleh}`.toLowerCase().includes(kunci)
+      );
+
+  document.getElementById("isiLogAktivitas").innerHTML = log.length
+    ? log
+        .map((l) => {
+          // Baris aktivitas level-batch (Upload/Hapus Batch, record_table='batch')
+          // ditandai beda dari edit field biasa - ikon + latar lembut, dan
+          // kolom "PEGAWAI" diisi nama batch-nya (bukan nama pegawai).
+          const isAktivitasBatch = l.record_table === "batch";
+          const ikon = l.field_diubah === "Upload Batch" ? "⬆️" : l.field_diubah === "Hapus Batch" ? "🗑️" : "";
+          const kolomKedua = isAktivitasBatch ? `${ikon} ${l.batch_label || "(batch tidak diketahui)"}` : l.nama_pegawai;
+          return `<div class="tabel-baris" style="grid-template-columns:1fr 1.3fr 1fr 1fr 1fr;${isAktivitasBatch ? "background:var(--biru-muda-bg)" : ""}">
               <span>${formatWaktu(l.diubah_pada)}</span><span>${kolomKedua}</span><span>${l.field_diubah}</span>
               <span style="color:var(--merah-teks)">${l.nilai_lama || "-"}</span><span style="color:var(--hijau-status-teks)">${l.nilai_baru}</span>
             </div>`;
-              })
-              .join("")
-          : `<div style="padding:16px;font-size:12.5px;color:var(--teks-muted);font-style:italic">Belum ada perubahan tercatat.</div>`
-      }
-    </div>
-  `;
+        })
+        .join("")
+    : `<div style="padding:16px;font-size:12.5px;color:var(--teks-muted);font-style:italic">${
+        kunci ? "Tidak ada aktivitas yang cocok dengan pencarian." : "Belum ada perubahan tercatat."
+      }</div>`;
 }
 
 // ---------------------------------------------------------------------
