@@ -24,6 +24,7 @@ bertingkat.
 | **Data Master** | Daftar Keterangan & Daftar Bidang dikelola dari halaman Pengaturan (bukan hardcode di kode lagi) |
 | **Manajemen Akun** | 2 peran — Master Admin (bisa tambah/nonaktifkan/hapus admin lain lewat dashboard) & Admin biasa |
 | **Tampilan** | Mode gelap/terang (tersimpan otomatis), logo instansi bisa diganti sendiri, animasi & transisi di seluruh antarmuka |
+| **Sidebar ringkas** | Desktop: sidebar bisa diciutkan jadi ikon saja (tab kecil di tepi kanan sidebar), preferensi tersimpan otomatis. Mobile: sidebar jadi laci yang dibuka lewat tombol hamburger atau swipe dari tepi kiri layar |
 | **Log Aktivitas** | Audit trail setiap perubahan data, siapa mengubah apa dan kapan |
 
 ---
@@ -157,6 +158,20 @@ Menu **Akun** cuma muncul untuk peran Master. Master Admin bisa:
   (pengaman bawaan). Menaikkan/menurunkan peran Master↔Admin sengaja cuma
   bisa lewat SQL manual, supaya tidak mudah salah klik.
 
+**Login dari beberapa device sekaligus (5 Agu 2026, sengaja tidak
+dibatasi):** sistem pakai Supabase Auth apa adanya, yang secara default
+mengizinkan banyak sesi aktif bersamaan untuk satu akun — jadi akun yang
+sama bisa login di HP dan laptop bersamaan tanpa saling logout. Ini
+keputusan sadar (bukan belum sempat dikerjakan): cukup memadai untuk
+konteks penggunaan internal Bidang Daskrimti selama password akun dijaga.
+Kalau ke depan dirasa perlu diperketat, opsi yang tersedia (belum
+diimplementasikan):
+1. **Single-device**, device lama otomatis logout begitu ada login baru —
+   butuh tabel/kolom "token sesi aktif" per akun & pengecekan tiap request.
+2. **Visibilitas sesi** — halaman Akun menampilkan daftar device yang
+   sedang login (tanpa memblokir), dengan tombol untuk mengakhiri sesi
+   tertentu secara manual.
+
 ---
 
 ## 5. Deteksi Duplikat (2 Lapis)
@@ -209,6 +224,14 @@ file/batch asal datanya.
 Menambah/menghapus di sini otomatis konsisten di seluruh sistem, tidak
 perlu ubah kode.
 
+**Tampilan ringkas (5 Agu 2026):** kartu "Daftar Keterangan" dan "Daftar
+Bidang" tertutup secara default — cuma menampilkan judul & jumlah pilihan
+(mis. "8 pilihan"). Klik header kartu untuk membuka isinya (daftar item
+berbentuk chip yang mengalir ke samping, bukan satu baris penuh per item
+seperti sebelumnya) berikut form tambah/hapusnya. Tujuannya supaya halaman
+Pengaturan tidak langsung penuh saat dibuka padahal belum tentu sedang mau
+diubah.
+
 ---
 
 ## 8. Kalibrasi PDF Sumber
@@ -257,3 +280,5 @@ Sama seperti sebelumnya, tidak dibahas detail karena di luar cakupan kode:
 - Normalisasi teks Sub Unit Kerja (kalau nanti ditemukan variasi
   penulisan yang tidak konsisten antar file PDF) belum diotomatisasi —
   perlu dilihat datanya dulu sebelum dibuatkan aturannya.
+- Pembatasan login satu perangkat aktif / daftar sesi yang sedang login —
+  sengaja belum dibuat, lihat catatan di bagian 4.4.

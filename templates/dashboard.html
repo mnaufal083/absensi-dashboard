@@ -78,13 +78,14 @@
         <svg class="ikon" viewBox="0 0 20 20" fill="none"><line x1="4" y1="6" x2="16" y2="6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><line x1="4" y1="10" x2="16" y2="10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="13" cy="10" r="1.6" fill="currentColor"/><line x1="4" y1="14" x2="16" y2="14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14" r="1.6" fill="currentColor"/></svg>
         <span class="nav-label">Pengaturan</span>
       </button>
-
-      <!-- Tombol collapse: cuma tampil di layar lebar (desktop), menciutkan sidebar jadi ikon saja -->
-      <button type="button" class="nav-btn-collapse" id="btnCollapseSidebar" aria-label="Ciutkan menu">
-        <svg class="ikon" id="ikonCollapse" viewBox="0 0 20 20" fill="none"><path d="M12.5 4.5L7 10l5.5 5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span class="nav-label">Ciutkan menu</span>
-      </button>
     </nav>
+
+    <!-- Tab collapse mengambang: nempel di tepi kanan sidebar, sejajar
+         tengah vertikal - cuma tampil di desktop (disembunyikan di mobile
+         lewat media query, karena di sana pakai laci+hamburger). -->
+    <button type="button" class="btn-collapse-mengambang" id="btnCollapseSidebar" aria-label="Ciutkan/lebarkan menu">
+      <svg class="ikon" id="ikonCollapse" viewBox="0 0 20 20" fill="none"><path d="M12.5 4.5L7 10l5.5 5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
 
     <main id="content" class="content">
       <p class="loading-text">Memuat...</p>

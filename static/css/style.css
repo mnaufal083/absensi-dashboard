@@ -178,28 +178,139 @@ button {
   height: 100%; overflow-y: auto; overflow-x: hidden;
   transition: width .22s ease;
 }
-.nav-btn, .nav-btn-collapse {
+.nav-btn {
   display: flex; align-items: center; gap: 10px; text-align: left;
   background: transparent; color: var(--teks-sekunder); border-left: 3px solid transparent;
   border-radius: 0; padding: 10px 16px; font-size: 13px; font-weight: 500; white-space: nowrap;
-  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease, padding .22s ease;
 }
 .nav-btn .ikon { color: var(--teks-muted); transition: color .15s ease; }
 .nav-btn.active { background: var(--biru-muda-bg); color: var(--biru); border-left-color: var(--biru); font-weight: 600; }
 .nav-btn.active .ikon { color: var(--biru); }
 .nav-btn:not(.active):hover { background: var(--abu-bg); color: var(--teks-utama); }
 
-.nav-btn-collapse {
-  margin-top: auto; border-top: 1px solid var(--border); color: var(--teks-muted); cursor: pointer;
+/* PERBAIKAN (5 Agu 2026): sebelumnya label disembunyikan lewat
+   "display:none" - properti ini TIDAK bisa dianimasikan, jadi labelnya
+   hilang SEKETIKA saat class .collapsed ditambah, sementara lebar sidebar
+   (.sidebar width) masih terus menyempit selama .22s. Dua animasi yang
+   tidak sinkron itu bikin ikon terasa "melompat"/bergeser tiba-tiba alih-
+   alih meluncur halus mengikuti tepi sidebar. Sekarang label dikecilkan
+   lewat max-width + opacity, sama-sama diberi durasi transisi, jadi
+   "menciut" berbarengan dan senada dengan animasi lebar sidebar - hasilnya
+   terasa seperti benar-benar di-swipe, bukan patah-patah. */
+.nav-label {
+  display: inline-block; overflow: hidden; opacity: 1; max-width: 180px;
+  transition: max-width .22s ease, opacity .15s ease .05s, margin-left .22s ease;
 }
-.nav-btn-collapse:hover { background: var(--abu-bg); color: var(--teks-utama); }
-.nav-btn-collapse .ikon { transition: transform .22s ease; }
-
-/* Mode ciutkan (desktop): lebar menyempit jadi cuma muat ikon, label disembunyikan */
 .sidebar.collapsed { width: 60px; }
-.sidebar.collapsed .nav-label { display: none; }
-.sidebar.collapsed .nav-btn, .sidebar.collapsed .nav-btn-collapse { justify-content: center; padding-left: 0; padding-right: 0; }
-.sidebar.collapsed #ikonCollapse { transform: rotate(180deg); }
+.sidebar.collapsed .nav-label { max-width: 0; opacity: 0; margin-left: -10px; transition: max-width .22s ease, opacity .1s ease, margin-left .22s ease; }
+.sidebar.collapsed .nav-btn { padding-left: 21px; padding-right: 21px; }
+
+/* -----------------------------------------------------------------------
+   TAB COLLAPSE MENGAMBANG — dipindah dari daftar menu paling bawah supaya
+   tidak "menghalangi"/tenggelam di antara menu. Sekarang jadi tab kecil
+   yang menonjol di TEPI KANAN sidebar, sejajar tengah vertikal (posisinya
+   independen dari scroll konten sidebar maupun scroll halaman), meniru
+   pola yang umum dipakai aplikasi seperti VS Code/Notion.
+----------------------------------------------------------------------- */
+.btn-collapse-mengambang {
+  position: absolute; top: 50%; left: 200px; transform: translate(-50%, -50%);
+  width: 20px; height: 46px; padding: 0; margin: 0; border-radius: 999px;
+  background: var(--kartu-bg); border: 1px solid var(--border);
+  color: var(--teks-muted); display: flex; align-items: center; justify-content: center;
+  cursor: pointer; z-index: 20; box-shadow: 0 1px 4px rgba(15,23,42,.08);
+  transition: left .22s ease, background-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+/* PERBAIKAN BUG (5 Agu 2026): sebelumnya tombol ini TIDAK punya "padding: 0"
+   sendiri, jadi ia ikut mewarisi padding umum "button { padding: 8px 15px }"
+   di atas. Karena box-sizing:border-box, padding kiri+kanan (30px) + border
+   (2px) itu LEBIH BESAR dari width:20px yang dimaksud, sehingga browser
+   terpaksa melebarkan kotak tombol jadi ~32px (bukan 20px) supaya padding-nya
+   muat. Akibatnya dua hal:
+   1) transform:translate(-50%) menghitung setengah dari lebar SALAH (32px,
+      bukan 20px) → tombol bergeser lebih jauh dari titik yang dimaksud,
+      persis keluhan "posisinya jadi tidak pas ditempat".
+   2) Kotak yang membesar itu (32x46) dikombinasikan dengan border-radius:999px
+      menjadi bentuk pil yang sangat bulat di ujung atas/bawahnya. Chromium
+      TIDAK menghitung area bulat yang "terpotong" itu sebagai area yang bisa
+      diklik, jadi area di sudut kiri-atas/kiri-bawah tombol sebenarnya
+      "milik" sidebar di baliknya, dan sudut kanan-atas/kanan-bawah "milik"
+      area konten di baliknya. Klik yang jatuh di zona itu (yang sekilas
+      masih terlihat seperti bagian tombol) diteruskan ke elemen di
+      belakangnya, bukan ke tombol - persis keluhan "diklik tidak langsung
+      terswipe, harus klik berkali-kali". Dengan padding:0 di sini, lebar
+      kotak kembali tepat 20px sesuai rancangan awal, jadi posisi & area klik
+      kembali presisi. */
+.btn-collapse-mengambang::before {
+  /* Perluas AREA KLIK (bukan tampilan) jadi persegi penuh tanpa sudut
+     membulat, supaya tidak ada lagi celah "zona mati" di sudut pil kecil
+     ini - klik di mana pun dekat tombol akan selalu kena, tanpa mengubah
+     bentuk visualnya yang tetap pil ramping. */
+  content: ""; position: absolute; inset: -6px -10px;
+}
+.btn-collapse-mengambang:hover { background: var(--biru-muda-bg); color: var(--biru); box-shadow: 0 2px 8px rgba(37,99,235,.18); }
+/* PERBAIKAN BUG (5 Agu 2026, part 2): posisi tombol ini ditahan lewat
+   transform:translate(-50%,-50%) di atas. Tapi ada aturan GLOBAL
+   "button:active { transform: scale(0.97) }" (cari di bawah, dekat
+   ".loading-text") yang berlaku utk semua elemen <button> di situs ini.
+   CSS "transform" TIDAK digabung antar rule - siapa yang menang (di sini
+   button:active menang saat diklik) akan MENIMPA TOTAL nilai transform
+   sebelumnya. Jadi begitu diklik, translate(-50%,-50%) yang menahan
+   tombol di tengah tepi sidebar hilang seketika, diganti scale(0.97)
+   saja -> tombol "meloncat" balik ke titik acuan aslinya (pojok kiri-atas
+   kotaknya sendiri), persis terlihat bergeser serong ke bawah-kanan.
+   Baris di bawah ini menang lewat spesifisitas (class+pseudo-class lebih
+   tinggi dari element+pseudo-class) dan tetap menyertakan translate agar
+   posisi tengah tidak pernah hilang, hanya menambahkan efek "ditekan". */
+.btn-collapse-mengambang:active { transform: translate(-50%, -50%) scale(0.94); }
+.btn-collapse-mengambang .ikon { width: 13px; height: 13px; transition: transform .22s ease; pointer-events: none; }
+/* Sidebar ciut -> tab ikut bergeser ke tepi baru (60px), panah dibalik arah */
+.sidebar.collapsed ~ .btn-collapse-mengambang { left: 60px; }
+.sidebar.collapsed ~ .btn-collapse-mengambang #ikonCollapse { transform: rotate(180deg); }
+
+/* -----------------------------------------------------------------------
+   CHIP DATA MASTER (halaman Pengaturan) — tampilan ringkas utk Daftar
+   Keterangan & Daftar Bidang. Sebelumnya tiap item = satu baris penuh
+   (kotak border selebar kartu + padding), jadi daftar isian sedikit saja
+   sudah memenuhi & butuh scroll. Sekarang tiap item jadi "chip" pil kecil
+   yang mengalir ke samping (flex-wrap) - jauh lebih padat, mirip tag.
+----------------------------------------------------------------------- */
+.chip-master-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-master {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--abu-bg); border: 1px solid var(--border); border-radius: 999px;
+  padding: 5px 5px 5px 12px; font-size: 12.5px; color: var(--teks-utama); line-height: 1.2;
+}
+.chip-master button {
+  all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%; color: var(--teks-muted);
+  font-size: 11px; line-height: 1; transition: background-color .15s ease, color .15s ease;
+}
+.chip-master button:hover { background: var(--merah-bg); color: var(--merah-teks); }
+
+/* -----------------------------------------------------------------------
+   PANEL RINGKAS DATA MASTER (halaman Pengaturan) — header kartu "Daftar
+   Keterangan" / "Daftar Bidang" tertutup by default (cuma judul + jumlah
+   item), isinya (daftar chip + form tambah) baru muncul setelah header
+   diklik. Sebelumnya keduanya langsung tampil penuh sekaligus, jadi kartu
+   terasa memenuhi halaman meski belum tentu sedang mau diubah.
+----------------------------------------------------------------------- */
+.panel-master-header {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  cursor: pointer; user-select: none; border-radius: 8px; margin: -4px; padding: 4px;
+  transition: background-color .15s ease;
+}
+.panel-master-header:hover { background: var(--abu-bg); }
+.panel-master-panah { color: var(--teks-muted); flex-shrink: 0; transition: transform .2s ease; }
+.panel-master-panah.terbuka { transform: rotate(180deg); }
+.panel-master-isi { animation: masukPanelMaster .18s ease; }
+@keyframes masukPanelMaster {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-master-panah, .panel-master-isi { transition: none !important; animation: none !important; }
+}
 
 .sidebar-backdrop {
   display: none; position: fixed; inset: 0; background: rgba(15,23,42,.45);
@@ -237,8 +348,9 @@ button {
      tersembunyi kalau tidak dibuka) - disembunyikan supaya tidak
      membingungkan dengan 2 mekanisme buka-tutup sekaligus. */
   .sidebar.collapsed { width: 240px; }
-  .sidebar.collapsed .nav-label { display: inline; }
-  .nav-btn-collapse { display: none; }
+  .sidebar.collapsed .nav-label { max-width: 180px; opacity: 1; margin-left: 0; }
+  .sidebar.collapsed .nav-btn { padding-left: 16px; padding-right: 16px; }
+  .btn-collapse-mengambang { display: none; }
 
   .content { padding: 1rem; }
 
@@ -253,7 +365,7 @@ button {
   .tabel-header-baris, .tabel-baris { min-width: 560px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar, .sidebar-backdrop, .nav-btn-collapse .ikon { transition: none !important; }
+  .sidebar, .sidebar-backdrop, .btn-collapse-mengambang, .btn-collapse-mengambang .ikon { transition: none !important; }
 }
 
 /* --- Subtab (Data Harian / Ringkasan Pegawai / Log Berkas Bermasalah) ---

@@ -41,6 +41,12 @@ function sembunyikanTooltip() {
 }
 let daftarKeteranganCache = null;
 let daftarBidangCache = null;
+// Status buka/tutup panel "Daftar Keterangan" & "Daftar Bidang" di halaman
+// Pengaturan (defaultnya tertutup/ringkas). Disimpan di variabel modul
+// (bukan re-set tiap render) supaya statusnya tetap terjaga walau panel
+// di-render ulang setelah tambah/hapus item.
+let panelKeteranganTerbuka = false;
+let panelBidangTerbuka = false;
 let pendingChanges = {}; // key: `${record_table}:${record_id}:${field}` -> {record_table, record_id, field, nilai_baru}
 let currentBatchId = null;
 const currentUserId = document.body.dataset.userId || null;
@@ -1971,50 +1977,71 @@ async function renderPengaturan() {
 
     <div class="grid-2" style="gap:14px;margin-bottom:16px">
       <div class="kartu">
-        <p class="stat-label" style="font-weight:600;margin-bottom:2px">Daftar Keterangan</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Pilihan dropdown "Keterangan" di tabel Data Harian</p>
-        <div id="daftarKeteranganList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:320px;overflow-y:auto">
-          ${keterangan
-            .map(
-              (k) => `<div style="display:flex;justify-content:space-between;align-items:center;border:0.5px solid var(--border);border-radius:8px;padding:8px 12px">
-              <span style="font-size:13px">${k.label}</span>
-              <button class="btn-sekunder" style="padding:4px 10px;font-size:11.5px;color:var(--merah-teks)" onclick="hapusKeterangan(${k.id})">Hapus</button>
-            </div>`
-            )
-            .join("")}
+        <div class="panel-master-header" onclick="toggleMasterPanel('Keterangan')" role="button" tabindex="0" aria-expanded="${panelKeteranganTerbuka}" aria-controls="panelKeterangan" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleMasterPanel('Keterangan');}">
+          <div>
+            <p class="stat-label" style="font-weight:600;margin-bottom:2px">Daftar Keterangan</p>
+            <p style="font-size:11px;color:var(--teks-muted);margin:0">${keterangan.length} pilihan — dropdown "Keterangan" di tabel Data Harian</p>
+          </div>
+          <svg id="panahKeterangan" class="ikon panel-master-panah ${panelKeteranganTerbuka ? "terbuka" : ""}" viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <div style="display:flex;gap:8px">
-          <input type="text" id="inputKeteranganBaru" placeholder="Tambah keterangan baru..." style="flex:1" />
-          <button class="btn-primer" onclick="tambahKeterangan()">Tambah</button>
+        <div id="panelKeterangan" class="panel-master-isi" ${panelKeteranganTerbuka ? "" : "hidden"}>
+          <div id="daftarKeteranganList" class="chip-master-wrap" style="margin:10px 0 12px;max-height:160px;overflow-y:auto">
+            ${keterangan
+              .map(
+                (k) => `<span class="chip-master">
+                ${k.label}
+                <button onclick="hapusKeterangan(${k.id})" title="Hapus ${k.label}" aria-label="Hapus ${k.label}">✕</button>
+              </span>`
+              )
+              .join("")}
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="inputKeteranganBaru" placeholder="Tambah keterangan baru..." style="flex:1" />
+            <button class="btn-primer" onclick="tambahKeterangan()">Tambah</button>
+          </div>
         </div>
       </div>
 
       <div class="kartu">
-        <p class="stat-label" style="font-weight:600;margin-bottom:2px">Daftar Bidang</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Pilihan Bidang di Ringkasan Pegawai &amp; filter Visualisasi</p>
-        <div id="daftarBidangList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:320px;overflow-y:auto">
-          ${bidang
-            .map(
-              (b) => `<div style="display:flex;justify-content:space-between;align-items:center;border:0.5px solid var(--border);border-radius:8px;padding:8px 12px">
-              <span style="font-size:13px">${b.label}</span>
-              <button class="btn-sekunder" style="padding:4px 10px;font-size:11.5px;color:var(--merah-teks)" onclick="hapusBidang(${b.id})">Hapus</button>
-            </div>`
-            )
-            .join("")}
+        <div class="panel-master-header" onclick="toggleMasterPanel('Bidang')" role="button" tabindex="0" aria-expanded="${panelBidangTerbuka}" aria-controls="panelBidang" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleMasterPanel('Bidang');}">
+          <div>
+            <p class="stat-label" style="font-weight:600;margin-bottom:2px">Daftar Bidang</p>
+            <p style="font-size:11px;color:var(--teks-muted);margin:0">${bidang.length} pilihan — Ringkasan Pegawai &amp; filter Visualisasi</p>
+          </div>
+          <svg id="panahBidang" class="ikon panel-master-panah ${panelBidangTerbuka ? "terbuka" : ""}" viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <div style="display:flex;gap:8px">
-          <input type="text" id="inputBidangBaru" placeholder="Tambah bidang baru (mis. DATUN)..." style="flex:1" />
-          <button class="btn-primer" onclick="tambahBidang()">Tambah</button>
+        <div id="panelBidang" class="panel-master-isi" ${panelBidangTerbuka ? "" : "hidden"}>
+          <div id="daftarBidangList" class="chip-master-wrap" style="margin:10px 0 12px;max-height:160px;overflow-y:auto">
+            ${bidang
+              .map(
+                (b) => `<span class="chip-master">
+                ${b.label}
+                <button onclick="hapusBidang(${b.id})" title="Hapus ${b.label}" aria-label="Hapus ${b.label}">✕</button>
+              </span>`
+              )
+              .join("")}
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="inputBidangBaru" placeholder="Tambah bidang baru (mis. DATUN)..." style="flex:1" />
+            <button class="btn-primer" onclick="tambahBidang()">Tambah</button>
+          </div>
         </div>
       </div>
     </div>
-
-    <p style="font-size:11.5px;font-weight:700;letter-spacing:.3px;color:var(--teks-muted);margin:0 0 8px;text-transform:uppercase">Tentang</p>
-    <div class="kartu">
-      <p style="font-size:12.5px;color:var(--teks-sekunder);margin:0 0 6px"><b>Sistem Rekapitulasi Absensi</b> — Kejaksaan Tinggi Jawa Tengah, Bidang Daskrimti</p>
-      <p style="font-size:11.5px;color:var(--teks-muted);margin:0">Masuk sebagai <b>${document.getElementById("userEmail")?.textContent || "-"}</b>. Penambahan/penghapusan akun admin dikelola langsung dari Supabase Dashboard (Authentication → Users), bukan dari halaman ini.</p>
-    </div>
   `;
+}
+
+function toggleMasterPanel(nama) {
+  // nama: "Keterangan" atau "Bidang"
+  if (nama === "Keterangan") panelKeteranganTerbuka = !panelKeteranganTerbuka;
+  else panelBidangTerbuka = !panelBidangTerbuka;
+
+  const panel = document.getElementById(`panel${nama}`);
+  const panah = document.getElementById(`panah${nama}`);
+  const terbuka = nama === "Keterangan" ? panelKeteranganTerbuka : panelBidangTerbuka;
+  if (panel) panel.hidden = !terbuka;
+  if (panah) panah.classList.toggle("terbuka", terbuka);
+  panel?.closest(".kartu")?.querySelector(".panel-master-header")?.setAttribute("aria-expanded", String(terbuka));
 }
 
 async function tambahKeterangan() {
