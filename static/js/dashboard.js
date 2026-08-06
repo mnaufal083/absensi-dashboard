@@ -851,6 +851,7 @@ async function bukaDetailBatch(batchId) {
 function renderDetailBatch(detail, keterangan, daftarBidang) {
   const b = detail.batch;
   const isFinal = b.status === "final";
+
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
       <div>
@@ -859,7 +860,8 @@ function renderDetailBatch(detail, keterangan, daftarBidang) {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-sekunder" onclick="gotoTab('riwayat')">← Semua batch</button>
-        <button class="btn-sekunder" onclick="ubahStatusBatch('${b.id}', '${isFinal ? "draft" : "final"}')">
+        <button class="btn-sekunder" id="btnTandaiFinal"
+          onclick="ubahStatusBatch('${b.id}', '${isFinal ? "draft" : "final"}')">
           ${isFinal ? "Tandai Draf lagi" : "Tandai Final (siap unduh)"}
         </button>
         <button class="btn-primer" onclick="unduhBatch('${b.id}', '${b.status}')">⬇ Unduh Excel</button>
@@ -991,8 +993,9 @@ function renderTabelHarian(rows, keterangan, isFinal, ringkasanByNip) {
       if (terbuka && !isi.dataset.dimuat) {
         const g = daftarGrup[gi];
         const dis = isFinal ? "disabled" : "";
+        const GRID_HARIAN = "1fr 1fr 1fr 1fr 1fr";
         isi.innerHTML = `
-          <div class="tabel-header-baris" style="grid-template-columns:0.8fr 1fr 1fr 1.3fr 1fr">
+          <div class="tabel-header-baris" style="grid-template-columns:${GRID_HARIAN}">
             <span>TANGGAL</span><span>JAM MASUK</span><span>JAM KELUAR</span><span>KETERANGAN</span><span>TELAT</span>
           </div>
           ${g.baris
@@ -1002,16 +1005,21 @@ function renderTabelHarian(rows, keterangan, isFinal, ringkasanByNip) {
               // langsung terlihat sekilas tanpa perlu baca kolom Keterangan.
               const isLibur = r.keterangan === "Libur";
               const warnaTanggal = isLibur ? "color:var(--merah-teks);font-weight:600" : "color:var(--teks-sekunder)";
-              // Telat (datang_telat) diwarnai merah kalau ada nilainya (bukan
-              // "-"/kosong) - menandai keterlambatan supaya menonjol.
+              // TELAT bukan input teks bebas yang terpisah dari Jam Masuk
+              // (dulu gampang tidak sinkron kalau Jam Masuk diedit tapi
+              // Telat lupa disesuaikan manual). Sekarang murni tampilan
+              // hasil hitung otomatis dari server (db.py::edit_field, rumus
+              // sama dengan ekstraksi PDF pertama kali) - otomatis ikut
+              // berubah & berwarna merah begitu Jam Masuk/Jadwal Masuk
+              // diedit dan disimpan.
               const adaTelat = r.datang_telat && r.datang_telat !== "-";
               const gayaTelat = adaTelat ? "color:var(--merah-teks);font-weight:600" : "";
-              return `<div class="tabel-baris ${r.is_edited ? "diedit" : ""}" style="grid-template-columns:0.8fr 1fr 1fr 1.3fr 1fr" data-record-id="${r.id}">
+              return `<div class="tabel-baris ${r.is_edited ? "diedit" : ""}" style="grid-template-columns:${GRID_HARIAN}" data-record-id="${r.id}">
               <span style="${warnaTanggal}">${formatTanggalTampil(r.tanggal)}</span>
               <input class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="jam_masuk" value="${r.jam_masuk || ""}" />
               <input class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="jam_keluar" value="${r.jam_keluar || ""}" />
               <select class="edit-field" ${dis} data-tabel="attendance_records" data-record="${r.id}" data-field="keterangan">${optionsKeterangan(keterangan, r.keterangan)}</select>
-              <input class="edit-field" ${dis} style="${gayaTelat}" data-tabel="attendance_records" data-record="${r.id}" data-field="datang_telat" value="${r.datang_telat || ""}" placeholder="-" />
+              <span class="telat-tampil" style="${gayaTelat}" title="Dihitung otomatis dari Jam Masuk vs Jadwal Masuk">${r.datang_telat && r.datang_telat !== "" ? r.datang_telat : "-"}</span>
             </div>`;
             })
             .join("")}
@@ -1039,8 +1047,8 @@ function renderTabelRingkasan(rows, isFinal, daftarBidang) {
   const GRID_RINGKASAN = "1.8fr 1fr 64px 64px 64px 64px 2fr";
   const dis = isFinal ? "disabled" : "";
   wrap.innerHTML = `
-    <p style="font-size:11px;color:var(--teks-muted);margin:0 0 8px">Kolom <b>Bidang</b> perlu dikoreksi manual kalau batch ini gabungan lintas-Bidang (sistem tidak bisa menebaknya otomatis dari isi PDF).</p>
-    <div class="tabel-wrap" style="min-width:900px;margin-bottom:6px">
+    <p style="font-size:11px;color:var(--teks-muted);margin:0 0 8px">Kolom <b>Bidang</b> perlu dikoreksi manual kalau batch ini gabungan lintas-Bidang (sistem tidak bisa menebaknya otomatis dari isi PDF). Kolom Telat/Sakit/Izin/Alpha/Rincian Cuti otomatis mengikuti data harian di tab Data Harian - tetap bisa dikoreksi manual di sini kalau diperlukan.</p>
+    <div class="tabel-wrap" style="min-width:960px;margin-bottom:6px">
       <div class="tabel-header-baris" style="grid-template-columns:${GRID_RINGKASAN}">
         <span>NAMA</span><span>BIDANG</span><span>TELAT</span><span>SAKIT</span><span>IZIN</span><span>ALPHA</span><span>RINCIAN CUTI</span>
       </div>
@@ -1099,6 +1107,41 @@ function pasangListenerEdit(container) {
   });
 }
 
+// Terapkan hasil terbaru satu baris (dikembalikan server dari
+// db.py::edit_field) ke DOM tanpa perlu reload seluruh batch - mencakup
+// kolom TELAT yang dihitung ulang otomatis dan kolom statistik
+// ringkasan_pegawai yang ikut disinkronkan. Begitu tersimpan, baris
+// otomatis dianggap sudah final (tidak perlu konfirmasi terpisah lagi).
+function terapkanHasilEdit(h) {
+  if (h.record_table === "attendance_records" && h.record) {
+    const r = h.record;
+    const baris = document.querySelector(`#sub-harian .tabel-baris[data-record-id="${r.id}"]`);
+    if (baris) {
+      baris.classList.toggle("diedit", !!r.is_edited);
+      const telatEl = baris.querySelector(".telat-tampil");
+      if (telatEl) {
+        const adaTelat = r.datang_telat && r.datang_telat !== "-";
+        telatEl.textContent = r.datang_telat && r.datang_telat !== "" ? r.datang_telat : "-";
+        telatEl.style.color = adaTelat ? "var(--merah-teks)" : "";
+        telatEl.style.fontWeight = adaTelat ? "600" : "400";
+      }
+    }
+  }
+  if (h.ringkasan_terkait) {
+    const rr = h.ringkasan_terkait;
+    const barisR = document.querySelector(`#sub-ringkasan .tabel-baris[data-record-id="${rr.id}"]`);
+    if (barisR) {
+      barisR.classList.add("diedit");
+      ["terlambat", "sakit", "izin", "alpha"].forEach((f) => {
+        const el = barisR.querySelector(`[data-field="${f}"]`);
+        if (el && document.activeElement !== el) el.value = rr[f] ?? 0;
+      });
+      const rincianEl = barisR.querySelector('[data-field="rincian_cuti"]');
+      if (rincianEl && document.activeElement !== rincianEl) rincianEl.value = rr.rincian_cuti || "";
+    }
+  }
+}
+
 async function simpanPerubahan() {
   const perubahan = Object.values(pendingChanges);
   if (!perubahan.length) return;
@@ -1110,14 +1153,19 @@ async function simpanPerubahan() {
     pendingChanges = {};
     document.getElementById("unsavedBar").style.display = "none";
     document.getElementById("savedBar").style.display = "flex";
+    (res.hasil || []).forEach(terapkanHasilEdit);
   } else {
-    alert("Gagal menyimpan perubahan.");
+    alert((res && res.pesan) || "Gagal menyimpan perubahan.");
   }
 }
 
 async function ubahStatusBatch(batchId, statusBaru) {
   const endpoint = statusBaru === "final" ? "final" : "draf";
-  await api(`/api/batches/${batchId}/${endpoint}`, { method: "POST" });
+  const res = await api(`/api/batches/${batchId}/${endpoint}`, { method: "POST" });
+  if (!res || !res.ok) {
+    alert((res && res.pesan) || "Gagal mengubah status batch.");
+    return;
+  }
   bukaDetailBatch(batchId);
 }
 
@@ -1127,7 +1175,11 @@ async function unduhBatch(batchId, statusSaatIni) {
       'Batch ini masih berstatus Draf. Excel cuma bisa diunduh dari batch yang sudah Final (supaya rekap yang terunduh selalu data yang sudah "dikunci").\n\nTandai Final sekarang dan lanjut unduh?'
     );
     if (!lanjut) return;
-    await api(`/api/batches/${batchId}/final`, { method: "POST" });
+    const res = await api(`/api/batches/${batchId}/final`, { method: "POST" });
+    if (!res || !res.ok) {
+      alert((res && res.pesan) || "Gagal menandai batch sebagai Final.");
+      return;
+    }
     if (currentBatchId === batchId) bukaDetailBatch(batchId); // refresh tampilan status & kunci field edit
   }
   window.location.href = `/api/batches/${batchId}/unduh`;

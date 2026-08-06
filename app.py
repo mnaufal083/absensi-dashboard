@@ -390,9 +390,15 @@ def api_edit():
             "pesan": "Batch ini berstatus Final dan tidak bisa diedit. Klik \"Tandai Draf lagi\" dulu di halaman batch untuk membuka kembali.",
         }), 409
 
+    hasil = []
     for p in data.get("perubahan", []):
-        db.edit_field(batch_id, p["record_table"], p["record_id"], p["field"], p["nilai_baru"], session["user"]["email"])
-    return jsonify({"ok": True})
+        hasil.append(db.edit_field(batch_id, p["record_table"], p["record_id"], p["field"], p["nilai_baru"], session["user"]["email"]))
+    # "hasil" membawa balik nilai TERBARU tiap baris yang diedit (termasuk
+    # kolom Telat & ringkasan_pegawai yang ikut dihitung ulang otomatis -
+    # lihat db.py::edit_field) supaya frontend bisa merefresh tampilan tanpa
+    # perlu reload seluruh batch. Begitu perubahan ini disimpan, baris
+    # dianggap langsung final - tidak ada langkah konfirmasi terpisah.
+    return jsonify({"ok": True, "hasil": hasil})
 
 
 @app.route("/api/batches/<batch_id>/unduh")

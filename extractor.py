@@ -321,6 +321,17 @@ def ekstrak_pdf(path_pdf, nama_file):
 # sama persis tapi byte file berbeda, sehingga tidak tertangkap oleh
 # perbandingan hash file utuh (lapis 1, dihitung di app.py).
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# FITUR BARU (6 Agu 2026): alias publik supaya db.py bisa memakai ULANG
+# rumus keterlambatan yang sama persis ("_hitung_telat" di atas) saat
+# menghitung ulang kolom "Telat" secara otomatis begitu Jam Masuk/Jadwal
+# Masuk diedit manual dari dashboard (lihat db.py::edit_field) - supaya
+# tidak ada dua salinan rumus toleransi 30 menit di tempat berbeda yang
+# rawan tidak sinkron kalau salah satu lupa diperbarui.
+# ---------------------------------------------------------------------------
+hitung_telat = _hitung_telat
+
+
 def hitung_signature_pegawai(baris_pegawai):
     """baris_pegawai: list dict baris harian (elemen dari `rows` hasil
     ekstrak_pdf) MILIK SATU NIP yang sama, dari SATU file yang sama.

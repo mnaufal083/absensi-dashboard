@@ -47,7 +47,13 @@ create table if not exists attendance_records (
     jumlah_jam_kerja  text not null default '',
     keterangan        text not null default '',
     sumber_file       text not null default '',
-    is_edited         boolean not null default false
+    is_edited         boolean not null default false,
+    dikonfirmasi      boolean not null default true -- SUDAH TIDAK DIPAKAI (6 Agu 2026):
+    -- fitur konfirmasi per baris terpisah sudah dihapus lagi - sekarang
+    -- perubahan yang sudah diedit & disimpan lewat "Simpan perubahan"
+    -- otomatis dianggap final, tanpa langkah tinjau/klik centang
+    -- tambahan. Kolom ini dibiarkan ada (tidak dibaca kode manapun lagi)
+    -- supaya tidak perlu migrasi drop-column di database yang sudah jalan.
 );
 create index if not exists idx_attendance_batch on attendance_records(batch_id);
 create index if not exists idx_attendance_nip on attendance_records(nip);
@@ -80,7 +86,8 @@ create table if not exists ringkasan_pegawai (
     jabatan                   text not null default '',
     bidang                    text not null default '', -- Bidang per-PEGAWAI (lihat catatan di bawah)
     sumber_file               text not null default '',
-    is_edited                 boolean not null default false
+    is_edited                 boolean not null default false,
+    dikonfirmasi              boolean not null default true -- sudah tidak dipakai, lihat catatan di attendance_records di atas
 );
 create index if not exists idx_ringkasan_batch on ringkasan_pegawai(batch_id);
 create index if not exists idx_ringkasan_nip on ringkasan_pegawai(nip);
@@ -282,3 +289,22 @@ create policy "authenticated_full_access" on pengaturan
 -- yang otomatis melewati RLS di atas. Kebijakan ini tetap berguna sebagai
 -- lapisan pengaman kedua kalau suatu saat ada akses langsung dari client
 -- memakai anon/public key.
+
+-- ============================================================================
+-- MIGRASI (6 Agu 2026) — kolom "dikonfirmasi" untuk fitur konfirmasi per
+-- baris sebelum batch bisa ditandai Final.
+--
+-- Kalau instalasi Supabase sudah ADA SEBELUMNYA (bukan pasang dari nol),
+-- jalankan HANYA blok di bawah ini di SQL Editor - dua tabel di atas
+-- ("create table if not exists") tidak akan menambah kolom baru ke tabel
+-- yang sudah ada, jadi kolomnya perlu ditambahkan manual lewat ALTER TABLE:
+--
+--   alter table attendance_records add column if not exists dikonfirmasi boolean not null default true;
+--   alter table ringkasan_pegawai add column if not exists dikonfirmasi boolean not null default true;
+--
+-- Aman dijalankan kapan pun, termasuk saat batch lama sudah berstatus Final
+-- - default "true" berarti semua baris lama otomatis dianggap sudah
+-- "dikonfirmasi" (karena memang belum ada fitur ini sebelumnya, tidak ada
+-- yang perlu ditinjau ulang), jadi tidak ada batch lama yang tiba-tiba
+-- terkunci tidak bisa di-final-kan gara-gara migrasi ini.
+-- ============================================================================

@@ -12,6 +12,7 @@ import os
 import httpx
 from datetime import datetime, timezone
 from supabase import create_client, Client
+from extractor import hitung_telat
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
@@ -438,15 +439,134 @@ def cek_dan_catat_signature_pegawai(batch_id, nip, signature, nama_file):
 # ---------------------------------------------------------------------------
 # EDIT satu field (dipakai tombol "Simpan perubahan" di editor tabel)
 # ---------------------------------------------------------------------------
+# FITUR BARU (6 Agu 2026): keterangan harian yang otomatis diakumulasikan ke
+# kolom statistik ringkasan_pegawai saat dihitung ULANG dari data harian
+# (lihat _rekalkulasi_ringkasan_dari_harian di bawah). Cocok dengan daftar
+# default di keterangan_master (schema.sql) - kalau admin menambah label
+# keterangan custom lain lewat menu Pengaturan yang TIDAK ada di peta ini
+# (selain yang berawalan "Cuti"), harinya tetap terhitung sebagai hari
+# kerja tapi tidak menambah kolom statistik spesifik mana pun - tetap bisa
+# dikoreksi manual lewat tab Ringkasan Pegawai seperti biasa.
+_KETERANGAN_KE_KOLOM_RINGKASAN = {
+    "sakit": "sakit",
+    "izin": "izin",
+    "alpha": "alpha",
+    "dinas luar": "dinas_luar",
+    "lepas piket": "lepas_piket",
+    "tugas belajar": "tugas_belajar",
+}
+
+
+def _rekalkulasi_ringkasan_dari_harian(batch_id, nip):
+    """Hitung ulang kolom statistik ringkasan_pegawai (Terlambat, Sakit,
+    Izin, Alpha, Dinas Luar, Lepas Piket, Tugas Belajar, Total Cuti,
+    Rincian Cuti, Total Hari Kerja) milik SATU pegawai dari SELURUH baris
+    attendance_records batch ini SAAT INI (setelah edit) - supaya tab
+    Ringkasan Pegawai (dan Excel yang diunduh darinya, lihat
+    app.py::api_unduh) selalu konsisten dengan data harian yang terlihat di
+    layar, bukan cuma angka statis hasil ekstraksi PDF pertama kali.
+
+    CATATAN: "Pulang Cepat", "Tidak Absen Datang", "Tidak Absen Pulang"
+    SENGAJA tidak dihitung ulang di sini - tidak ada kolom harian yang
+    merekam ketiganya secara eksplisit (PDF sumber cuma memberi angka
+    lewat blok ringkasan halaman terakhir per pegawai, bukan per tanggal).
+    Ketiganya tetap bisa dikoreksi manual lewat tab Ringkasan Pegawai.
+
+    Return baris ringkasan_pegawai yang sudah diperbarui, atau None kalau
+    tidak ada baris ringkasan yang cocok (mis. NIP kosong/tidak dikenal)."""
+    if not nip or nip == "-":
+        return None
+
+    baris_harian = _ambil_semua(
+        supabase.table("attendance_records").select("keterangan,datang_telat")
+        .eq("batch_id", batch_id).eq("nip", nip)
+    )
+    if not baris_harian:
+        return None
+
+    hitung = {kolom: 0 for kolom in _KETERANGAN_KE_KOLOM_RINGKASAN.values()}
+    terlambat = 0
+    total_hari_kerja = 0
+    cuti_per_label = {}
+
+    for r in baris_harian:
+        ket = (r.get("keterangan") or "").strip()
+        ket_kecil = ket.lower()
+        telat = r.get("datang_telat") or "-"
+        if telat not in ("", "-"):
+            terlambat += 1
+        if ket_kecil == "libur":
+            continue  # hari libur tidak dihitung sebagai hari kerja (konsisten dgn extractor.py)
+        total_hari_kerja += 1
+        if ket_kecil in _KETERANGAN_KE_KOLOM_RINGKASAN:
+            hitung[_KETERANGAN_KE_KOLOM_RINGKASAN[ket_kecil]] += 1
+        elif ket_kecil.startswith("cuti"):
+            cuti_per_label[ket.upper()] = cuti_per_label.get(ket.upper(), 0) + 1
+
+    total_cuti = sum(cuti_per_label.values())
+    rincian_cuti = ", ".join(f"{label} : {jumlah} Hari" for label, jumlah in cuti_per_label.items())
+
+    pembaruan = {
+        "terlambat": terlambat,
+        "total_cuti": total_cuti,
+        "rincian_cuti": rincian_cuti,
+        "total_hari_kerja": total_hari_kerja,
+        "is_edited": True,
+        **hitung,
+    }
+    res = supabase.table("ringkasan_pegawai").update(pembaruan)\
+        .eq("batch_id", batch_id).eq("nip", nip).execute()
+    return res.data[0] if res.data else None
+
+
+# Field harian yang kalau diubah, ikut memicu hitung ulang otomatis kolom
+# "Telat" (jam_masuk/jadwal_masuk) dan/atau statistik ringkasan_pegawai
+# (jam_masuk/jadwal_masuk/keterangan) milik pegawai bersangkutan.
+_FIELD_PEMICU_HITUNG_ULANG_TELAT = ("jam_masuk", "jadwal_masuk")
+_FIELD_PEMICU_REKALKULASI_RINGKASAN = ("jam_masuk", "jadwal_masuk", "keterangan")
+
+
 def edit_field(batch_id, record_table, record_id, field, nilai_baru, user_id):
+    """Simpan satu perubahan field (dipanggil dari app.py::api_edit, satu
+    kali per field yang diubah). Selain menyimpan nilai barunya sendiri:
+
+    - Baris yang diedit otomatis ditandai is_edited=True (dipakai untuk
+      menyorot baris hijau di tampilan "sudah pernah dikoreksi"). Begitu
+      perubahan ini disimpan lewat tombol "Simpan perubahan", baris
+      dianggap langsung final - tidak ada langkah konfirmasi terpisah.
+    - Kalau yang diedit Jam Masuk atau Jadwal Masuk di data harian, kolom
+      "Telat" dihitung ULANG otomatis (bukan lagi input teks bebas terpisah
+      yang gampang lupa disesuaikan) memakai rumus yang sama persis dengan
+      ekstraksi PDF pertama kali (extractor.py::hitung_telat).
+    - Kalau yang diedit Jam Masuk/Jadwal Masuk/Keterangan di data harian,
+      statistik ringkasan_pegawai pegawai itu (Terlambat/Sakit/Izin/Alpha/
+      dst) dihitung ULANG dari SELURUH data harian terbaru miliknya, supaya
+      tab Ringkasan Pegawai dan Excel hasil unduhan selalu mengikuti data
+      harian yang sudah dikoreksi.
+
+    Return dict {"record_table", "record", "ringkasan_terkait"} - "record"
+    berisi baris LENGKAP yang baru saja diperbarui (dipakai frontend untuk
+    merefresh tampilan Telat tanpa reload seluruh batch), "ringkasan_terkait"
+    berisi baris ringkasan_pegawai yang ikut diperbarui otomatis (atau None
+    kalau tidak ada/tidak relevan)."""
     if record_table not in ("attendance_records", "ringkasan_pegawai"):
         raise ValueError("record_table tidak dikenal")
 
-    lama = supabase.table(record_table).select(f"nama,{field}").eq("id", record_id).single().execute().data
-    nilai_lama = lama.get(field) if lama else None
-    nama_pegawai = lama.get("nama", "") if lama else ""
+    lama = supabase.table(record_table).select("*").eq("id", record_id).single().execute().data
+    if not lama:
+        raise ValueError("Baris data tidak ditemukan (mungkin sudah dihapus)")
+    nilai_lama = lama.get(field)
+    nama_pegawai = lama.get("nama", "")
 
-    supabase.table(record_table).update({field: nilai_baru, "is_edited": True}).eq("id", record_id).execute()
+    pembaruan = {field: nilai_baru, "is_edited": True}
+
+    if record_table == "attendance_records" and field in _FIELD_PEMICU_HITUNG_ULANG_TELAT:
+        jadwal_masuk = nilai_baru if field == "jadwal_masuk" else lama.get("jadwal_masuk", "")
+        jam_masuk = nilai_baru if field == "jam_masuk" else lama.get("jam_masuk", "")
+        pembaruan["datang_telat"] = hitung_telat(jadwal_masuk, jam_masuk)
+
+    res = supabase.table(record_table).update(pembaruan).eq("id", record_id).execute()
+    baris_baru = res.data[0] if res.data else None
 
     supabase.table("record_edit_log").insert({
         "batch_id": batch_id,
@@ -458,6 +578,12 @@ def edit_field(batch_id, record_table, record_id, field, nilai_baru, user_id):
         "nilai_baru": str(nilai_baru),
         "diubah_oleh": user_id,
     }).execute()
+
+    ringkasan_terkait = None
+    if record_table == "attendance_records" and field in _FIELD_PEMICU_REKALKULASI_RINGKASAN:
+        ringkasan_terkait = _rekalkulasi_ringkasan_dari_harian(batch_id, lama.get("nip"))
+
+    return {"record_table": record_table, "record": baris_baru, "ringkasan_terkait": ringkasan_terkait}
 
 
 # ---------------------------------------------------------------------------

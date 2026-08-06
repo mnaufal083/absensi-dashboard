@@ -550,11 +550,13 @@ html[data-tema="gelap"] .login-badge { background: linear-gradient(135deg, var(-
 .tabel-baris { border-top: 1px solid var(--border); font-size: 12.5px; align-items: center; }
 .tabel-baris.diedit { background: #F0FDF4; }
 .tabel-baris:hover { background: var(--abu-bg); cursor: pointer; }
-.tabel-header-baris, .tabel-baris { display: grid; padding: 8px 12px; }
+.tabel-header-baris, .tabel-baris { display: grid; padding: 8px 12px; column-gap: 10px; }
 
 input.edit-field:disabled, select.edit-field:disabled {
   background-color: var(--abu-bg); color: var(--teks-muted); cursor: not-allowed; border-color: var(--border); opacity: .8;
 }
+
+.telat-tampil { font-size: 12.5px; }
 
 .btn-hapus-baris {
   background: none; border: none; color: var(--teks-muted); cursor: pointer;
