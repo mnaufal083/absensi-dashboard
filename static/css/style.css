@@ -118,6 +118,14 @@ button {
 .btn-primer:hover { background: var(--biru-hover); }
 .btn-sekunder { background: var(--kartu-bg); color: var(--biru); border: 1px solid var(--biru-muda-tepi); }
 .btn-sekunder:hover { background: var(--biru-muda-bg); }
+/* FITUR BARU (11 Agu 2026): dipakai tombol "Unduh Excel" selagi batch
+   masih Draf - abu-abu redup dulu (belum "siap unduh"), baru berubah jadi
+   .btn-primer (biru) begitu status batch Final. Tetap bisa diklik (bukan
+   disabled) karena mengklik saat Draf tetap berguna: memicu alur "tandai
+   Final dulu, baru lanjut unduh" yang sudah ada - cuma warnanya yang
+   menandakan belum siap, bukan mengunci fungsinya. */
+.btn-belum-siap { background: var(--abu-bg); color: var(--teks-muted); border: 1px solid var(--border); }
+.btn-belum-siap:hover { background: var(--border); color: var(--teks-sekunder); }
 
 .ikon { width: 17px; height: 17px; flex-shrink: 0; vertical-align: -3px; }
 .ikon-sm { width: 14px; height: 14px; }

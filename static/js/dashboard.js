@@ -98,12 +98,16 @@ function gotoTab(name, { catatRiwayat = true } = {}) {
   (loaders[namaValid] || renderBeranda)();
 }
 
-// Tombol Back/Forward browser -> pindah ke tab sesuai state riwayat,
-// TANPA mendaftarkan entri riwayat baru lagi (kalau tidak, bisa jadi
-// tumpukan ganda / balik-maju terasa "nyangkut").
+// Tombol Back/Forward browser -> pindah ke tab (atau batch spesifik)
+// sesuai state riwayat, TANPA mendaftarkan entri riwayat baru lagi (kalau
+// tidak, bisa jadi tumpukan ganda / balik-maju terasa "nyangkut").
 window.addEventListener("popstate", (e) => {
-  const tab = (e.state && e.state.tab) || "beranda";
-  gotoTab(tab, { catatRiwayat: false });
+  const state = e.state || { tab: "beranda" };
+  if (state.tab === "riwayat" && state.batchId) {
+    bukaDetailBatch(state.batchId, { catatRiwayat: false });
+  } else {
+    gotoTab(state.tab || "beranda", { catatRiwayat: false });
+  }
 });
 
 // -----------------------------------------------------------------------
@@ -861,9 +865,32 @@ function formatPeriode(awalIso, akhirIso) {
 // ---------------------------------------------------------------------
 // RIWAYAT BATCH — detail (data harian / ringkasan / log berkas)
 // ---------------------------------------------------------------------
-async function bukaDetailBatch(batchId) {
+// PERBAIKAN (11 Agu 2026): dulu HANYA gotoTab() yang mendaftarkan entri
+// riwayat browser (history.pushState) - membuka detail satu batch dari
+// daftar Riwayat Batch TIDAK menambah entri apa pun. Akibatnya begitu
+// pengguna klik "Back" dari tampilan Data Harian sebuah batch, browser
+// melompati "Riwayat Batch" sama sekali dan mendarat di entri riwayat
+// SEBELUM itu (mis. "Proses batch baru", tab terakhir yang sungguhan
+// mendaftarkan entri). Sekarang bukaDetailBatch() ikut mendaftarkan
+// entrinya sendiri (hash "#riwayat/<id-batch>"), jadi urutan riwayat
+// browser jadi: ... -> #riwayat -> #riwayat/<id-batch>, dan tombol Back
+// benar-benar kembali ke daftar Riwayat Batch dulu, baru ke tab sebelumnya
+// kalau di-klik Back sekali lagi.
+async function bukaDetailBatch(batchId, { catatRiwayat = true } = {}) {
   currentBatchId = batchId;
   pendingChanges = {};
+
+  const hashBatch = `#riwayat/${batchId}`;
+  if (catatRiwayat && location.hash !== hashBatch) {
+    // Kalau belum ada entri "#riwayat" (mis. batch baru selesai diproses
+    // lalu langsung dibuka otomatis dari tab Proses), sisipkan dulu supaya
+    // Back tetap berhenti di daftar Riwayat Batch, bukan balik ke tab Proses.
+    if (location.hash !== "#riwayat") {
+      history.pushState({ tab: "riwayat" }, "", "#riwayat");
+    }
+    history.pushState({ tab: "riwayat", batchId }, "", hashBatch);
+  }
+
   content.innerHTML = '<p class="loading-text">Memuat batch...</p>';
   const [detail, keterangan, bidang] = await Promise.all([
     api(`/api/batches/${batchId}`),
@@ -889,7 +916,10 @@ function renderDetailBatch(detail, keterangan, daftarBidang) {
           onclick="ubahStatusBatch('${b.id}', '${isFinal ? "draft" : "final"}')">
           ${isFinal ? "Tandai Draf lagi" : "Tandai Final (siap unduh)"}
         </button>
-        <button class="btn-primer" onclick="unduhBatch('${b.id}', '${b.status}')">⬇ Unduh Excel</button>
+        <button class="${isFinal ? "btn-primer" : "btn-belum-siap"}" onclick="unduhBatch('${b.id}', '${b.status}')"
+          title="${isFinal ? "Unduh Excel" : "Batch masih Draf - klik untuk tandai Final dulu, baru bisa diunduh"}">
+          ⬇ Unduh Excel
+        </button>
         <button class="btn-sekunder" onclick="hapusBatch('${b.id}')" style="color:var(--merah-teks);border-color:#E8B8A8">Hapus batch</button>
       </div>
     </div>
