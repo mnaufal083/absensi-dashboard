@@ -137,7 +137,8 @@ create table if not exists bidang_master (
     urutan   integer not null default 0
 );
 insert into bidang_master (label, urutan) values
-    ('PIDMIL', 0), ('BIN', 1), ('PIDUM', 2), ('PIDSUS', 3), ('DATUN', 4), ('INTEL', 5)
+    ('PIDMIL', 0), ('BIN', 1), ('PIDUM', 2), ('PIDSUS', 3), ('DATUN', 4), ('INTEL', 5),
+    ('WAS', 6), ('PA', 7), ('SEKUM', 8)
 on conflict (label) do nothing;
 
 -- ----------------------------------------------------------------------------

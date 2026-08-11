@@ -61,7 +61,18 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
   });
 });
 
-function gotoTab(name) {
+// PERBAIKAN (5 Agu 2026): dulu pindah tab (Beranda/Proses/Riwayat/dst) sama
+// sekali tidak menambah apa pun ke riwayat navigasi browser - cuma
+// mengganti isi #content lewat JS. Akibatnya tombol "Back" browser tidak
+// pernah tahu ada "halaman" per-tab sama sekali, jadi begitu diklik dia
+// lompat ke navigasi NYATA terakhir sebelum dashboard ini dimuat - yang
+// mana adalah halaman Login. Sekarang tiap pindah tab mendaftarkan entri
+// riwayat baru (history.pushState) dengan hash URL (mis. "#riwayat"),
+// dan tombol Back/Forward browser didengarkan (popstate) untuk kembali ke
+// tab yang benar alih-alih ke Login. Me-refresh halaman di tab tertentu
+// atau membagikan link ke tab spesifik juga ikut jadi bisa dipakai sebagai
+// bonus, karena hash URL-nya sekarang mencerminkan tab yang aktif.
+function gotoTab(name, { catatRiwayat = true } = {}) {
   document.querySelectorAll(".nav-btn").forEach((b) => {
     b.classList.toggle("active", b.dataset.tab === name);
   });
@@ -77,9 +88,23 @@ function gotoTab(name) {
     akun: renderAkunList,
     pengaturan: renderPengaturan,
   };
+  const namaValid = loaders[name] ? name : "beranda";
+
+  if (catatRiwayat && location.hash !== `#${namaValid}`) {
+    history.pushState({ tab: namaValid }, "", `#${namaValid}`);
+  }
+
   content.innerHTML = '<p class="loading-text">Memuat...</p>';
-  (loaders[name] || renderBeranda)();
+  (loaders[namaValid] || renderBeranda)();
 }
+
+// Tombol Back/Forward browser -> pindah ke tab sesuai state riwayat,
+// TANPA mendaftarkan entri riwayat baru lagi (kalau tidak, bisa jadi
+// tumpukan ganda / balik-maju terasa "nyangkut").
+window.addEventListener("popstate", (e) => {
+  const tab = (e.state && e.state.tab) || "beranda";
+  gotoTab(tab, { catatRiwayat: false });
+});
 
 // -----------------------------------------------------------------------
 // SIDEBAR RESPONSIF — FITUR BARU (1 Agu 2026)
@@ -2130,5 +2155,13 @@ async function hapusBidang(id) {
 
 // ---------------------------------------------------------------------
 // INISIALISASI
+// Muat tab sesuai hash URL saat dashboard pertama dibuka (mis. kalau
+// halaman di-refresh di tab tertentu, atau link "#riwayat" dibagikan
+// langsung), dan pastikan ada satu entri riwayat awal supaya popstate
+// pertama kali (tombol Back) punya sesuatu yang valid untuk dituju.
 // ---------------------------------------------------------------------
-gotoTab("beranda");
+(function mulaiRoutingAwal() {
+  const tabAwal = (location.hash || "#beranda").slice(1);
+  history.replaceState({ tab: tabAwal }, "", `#${tabAwal}`);
+  gotoTab(tabAwal, { catatRiwayat: false });
+})();
