@@ -551,6 +551,40 @@ html[data-tema="gelap"] .login-badge { background: linear-gradient(135deg, var(-
 }
 .konteks-banner b { color: var(--biru-tua); }
 .stat-angka { font-size: 21px; font-weight: 700; margin: 0; color: var(--teks-utama); }
+
+/* -----------------------------------------------------------------------
+   PANEL RINCIAN KATEGORI (klik kartu statistik / legenda donat) — FITUR
+   BARU (11 Agu 2026)
+----------------------------------------------------------------------- */
+.kartu-klik { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
+.kartu-klik:hover { transform: translateY(-2px); box-shadow: 0 8px 18px -10px rgba(15,23,42,.18); border-color: var(--biru-muda-tepi); }
+.stat-klik-hint { font-size: 10px; color: var(--teks-muted); margin: 4px 0 0; opacity: 0; transition: opacity .15s ease; }
+.kartu-klik:hover .stat-klik-hint { opacity: 1; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15,23,42,.5); z-index: 100;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: modalFadeIn .18s ease;
+}
+@keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-box {
+  background: var(--kartu-bg); border-radius: 14px; padding: 22px; width: 640px; max-width: 100%;
+  max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 50px -15px rgba(15,23,42,.35);
+  animation: modalMasuk .2s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes modalMasuk { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+.toggle-urut { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+.toggle-urut-btn {
+  background: var(--kartu-bg); color: var(--teks-sekunder); border: none; padding: 7px 12px;
+  font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.toggle-urut-btn.active { background: var(--biru); color: #fff; }
+.toggle-urut-btn:not(.active):hover { background: var(--abu-bg); }
+
+@media (max-width: 880px) {
+  .modal-box { width: 100%; padding: 16px; }
+}
 .stat-label { font-size: 11.5px; color: var(--teks-sekunder); margin: 0 0 5px; display: flex; align-items: center; gap: 5px; }
 
 .tabel-wrap { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--kartu-bg); overflow-x: auto; }

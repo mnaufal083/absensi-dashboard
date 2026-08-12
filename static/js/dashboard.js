@@ -15,6 +15,7 @@ const ICONS = {
   x: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><line x1="5" y1="5" x2="15" y2="15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="15" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
   check: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   search: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5" stroke="currentColor" stroke-width="1.7"/><line x1="12.3" y1="12.3" x2="17" y2="17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`,
+  download: `<svg class="ikon" viewBox="0 0 20 20" fill="none"><path d="M10 3v9.5M6.2 9.2L10 13l3.8-3.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15.5v.8a1.7 1.7 0 0 0 1.7 1.7h8.6a1.7 1.7 0 0 0 1.7-1.7v-.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`,
 };
 
 // Setiap kali isi #content diganti (apa pun fungsi render-nya), otomatis
@@ -49,6 +50,7 @@ let panelKeteranganTerbuka = false;
 let panelBidangTerbuka = false;
 let pendingChanges = {}; // key: `${record_table}:${record_id}:${field}` -> {record_table, record_id, field, nilai_baru}
 let currentBatchId = null;
+let filterVisualisasiSaatIni = { mode: "all", value: "", label: "Seluruh Batch (akumulasi total)" };
 const currentUserId = document.body.dataset.userId || null;
 
 // ---------------------------------------------------------------------
@@ -1430,9 +1432,22 @@ async function renderVisualisasi() {
             <button type="button" id="btnEditJumlahRiil" title="Ubah angka referensi" style="border:none;background:none;color:var(--biru);cursor:pointer;font-size:11px;padding:0 0 0 4px">✎ ubah</button>
           </p>
         </div>
-        <div class="kartu"><p class="stat-label">${ICONS.clock} Telat (hari)</p><p class="stat-angka" style="color:#2563EB" id="statTelat">-</p></div>
-        <div class="kartu"><p class="stat-label">Sakit (hari)</p><p class="stat-angka" style="color:#D97706" id="statSakit">-</p></div>
-        <div class="kartu"><p class="stat-label">${ICONS.x} Alpha (hari)</p><p class="stat-angka" style="color:var(--merah-teks)" id="statAlpha">-</p></div>
+        <div class="kartu kartu-klik" data-jenis="stat" data-field="terlambat" data-label="Telat">
+          <p class="stat-label">${ICONS.clock} Telat (hari)</p><p class="stat-angka" style="color:#2563EB" id="statTelat">-</p>
+          <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
+        </div>
+        <div class="kartu kartu-klik" data-jenis="stat" data-field="sakit" data-label="Sakit">
+          <p class="stat-label">Sakit (hari)</p><p class="stat-angka" style="color:#D97706" id="statSakit">-</p>
+          <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
+        </div>
+        <div class="kartu kartu-klik" data-jenis="stat" data-field="izin" data-label="Izin">
+          <p class="stat-label">Izin (hari)</p><p class="stat-angka" style="color:#EAB308" id="statIzin">-</p>
+          <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
+        </div>
+        <div class="kartu kartu-klik" data-jenis="stat" data-field="alpha" data-label="Alpha">
+          <p class="stat-label">${ICONS.x} Alpha (hari)</p><p class="stat-angka" style="color:var(--merah-teks)" id="statAlpha">-</p>
+          <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
+        </div>
       </div>
     </div>
 
@@ -1458,6 +1473,11 @@ async function renderVisualisasi() {
 
   document.getElementById("filterBatch").addEventListener("change", muatDataVisualisasi);
   document.getElementById("btnEditJumlahRiil").addEventListener("click", editJumlahPegawaiRiil);
+  // FITUR BARU (11 Agu 2026): klik kartu Telat/Sakit/Izin/Alpha membuka
+  // panel rincian per pegawai untuk metrik itu.
+  document.querySelectorAll(".kartu-klik").forEach((kartu) => {
+    kartu.addEventListener("click", () => bukaRincianKategori(kartu.dataset.jenis, kartu.dataset.field, kartu.dataset.label));
+  });
 
   muatDataVisualisasi();
 }
@@ -1501,11 +1521,138 @@ async function muatDataVisualisasi() {
   document.getElementById("statTotal").textContent = viz.statistik.total_pegawai;
   document.getElementById("statTelat").textContent = viz.statistik.telat;
   document.getElementById("statSakit").textContent = viz.statistik.sakit;
+  document.getElementById("statIzin").textContent = viz.statistik.izin;
   document.getElementById("statAlpha").textContent = viz.statistik.alpha;
+
+  // FITUR BARU (11 Agu 2026): disimpan di scope modul supaya panel rincian
+  // (dibuka dari klik kartu statistik / baris legenda donat) tahu filter
+  // periode mana yang sedang aktif tanpa perlu baca ulang dropdown-nya.
+  filterVisualisasiSaatIni = { mode, value, label: labelBatch };
 
   renderDonutKeterangan(viz.keterangan);
   renderTrenBulananGaris("trenBulanan", viz.tren);
   renderBarKeterlambatan(viz.ranking_terlambat);
+}
+
+// -----------------------------------------------------------------------
+// PANEL RINCIAN KATEGORI — FITUR BARU (11 Agu 2026)
+// Dibuka dari klik kartu statistik (Telat/Sakit/Izin/Alpha) ATAU baris
+// legenda donat Komposisi Keterangan di Visualisasi. Menampilkan SEMUA
+// pegawai (bukan cuma top-N ringkasan) untuk kategori itu, bisa dicari,
+// diurutkan nama/jumlah, dan diunduh sebagai laporan Excel - semuanya
+// tetap mengikuti filter Batch/Tahun yang sedang aktif di halaman
+// Visualisasi (lihat filterVisualisasiSaatIni).
+// jenis: 'stat' (kolom ringkasan_pegawai, mis. field='terlambat') atau
+// 'keterangan' (label Keterangan harian apa adanya, mis. 'Alpha'/'WFO').
+// -----------------------------------------------------------------------
+async function bukaRincianKategori(jenis, kunci, labelTampil) {
+  document.getElementById("modalRincianOverlay")?.remove(); // jaga-jaga dobel klik cepat
+
+  const overlay = document.createElement("div");
+  overlay.id = "modalRincianOverlay";
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px">
+        <div>
+          <p style="font-size:15px;font-weight:700;margin:0" class="judul-serif">Rincian ${labelTampil}</p>
+          <p style="font-size:11.5px;color:var(--teks-muted);margin:2px 0 0">${filterVisualisasiSaatIni.label}</p>
+        </div>
+        <button type="button" id="btnTutupModalRincian" aria-label="Tutup" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--teks-muted);line-height:1">✕</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0 10px">
+        <input type="text" id="rincianCari" placeholder="Cari nama atau NIP..." style="flex:1;min-width:180px" />
+        <div class="toggle-urut">
+          <button type="button" class="toggle-urut-btn active" data-urut="jumlah">Jumlah terbanyak</button>
+          <button type="button" class="toggle-urut-btn" data-urut="nama">Nama (A-Z)</button>
+        </div>
+        <button type="button" class="btn-sekunder" id="btnUnduhRincian">${ICONS.download || "⬇"} Unduh laporan</button>
+      </div>
+      <div id="rincianIsi"><p class="loading-text">Memuat...</p></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById("btnTutupModalRincian").addEventListener("click", () => overlay.remove());
+  document.addEventListener("keydown", function escHandler(e) {
+    if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", escHandler); }
+  });
+
+  const paramsAmbil = new URLSearchParams({
+    filter_mode: filterVisualisasiSaatIni.mode,
+    filter_value: filterVisualisasiSaatIni.value || "",
+  });
+  if (jenis === "stat") {
+    paramsAmbil.set("jenis", "stat");
+    paramsAmbil.set("field", kunci);
+  } else {
+    paramsAmbil.set("jenis", "keterangan");
+    paramsAmbil.set("label", kunci);
+  }
+
+  const data = await api(`/api/visualisasi/rincian?${paramsAmbil.toString()}`);
+  if (!overlay.isConnected) return; // modal sudah ditutup sebelum data selesai dimuat
+  let urutSaatIni = "jumlah";
+
+  function renderIsiRincian() {
+    const kataKunci = (document.getElementById("rincianCari")?.value || "").trim().toLowerCase();
+    let tampil = (data || []).filter((d) => !kataKunci || `${d.nama || ""} ${d.nip || ""}`.toLowerCase().includes(kataKunci));
+    tampil = [...tampil].sort((a, b) =>
+      urutSaatIni === "nama" ? (a.nama || "").localeCompare(b.nama || "") : (b.jumlah || 0) - (a.jumlah || 0)
+    );
+    const isi = document.getElementById("rincianIsi");
+    if (!isi) return;
+    if (!tampil.length) {
+      isi.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic;padding:14px 0">Tidak ada data untuk kategori ini pada cakupan yang dipilih.</p>`;
+      return;
+    }
+    isi.innerHTML = `
+      <div class="tabel-wrap">
+        <div class="tabel-header-baris" style="grid-template-columns:0.5fr 2fr 1.4fr 1fr">
+          <span>NO</span><span>NAMA</span><span>NIP</span><span>JUMLAH HARI</span>
+        </div>
+        <div style="max-height:52vh;overflow-y:auto">
+          ${tampil
+            .map(
+              (d, i) => `<div class="tabel-baris" style="grid-template-columns:0.5fr 2fr 1.4fr 1fr">
+              <span>${i + 1}</span><span>${d.nama || "-"}</span><span>${d.nip || "-"}</span>
+              <span style="font-weight:600">${d.jumlah} hari</span>
+            </div>`
+            )
+            .join("")}
+        </div>
+      </div>
+      <p style="font-size:11px;color:var(--teks-muted);margin:8px 0 0">${tampil.length} pegawai ditampilkan.</p>
+    `;
+  }
+
+  renderIsiRincian();
+  document.getElementById("rincianCari").addEventListener("input", renderIsiRincian);
+  overlay.querySelectorAll(".toggle-urut-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      overlay.querySelectorAll(".toggle-urut-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      urutSaatIni = btn.dataset.urut;
+      renderIsiRincian();
+    });
+  });
+
+  document.getElementById("btnUnduhRincian").addEventListener("click", () => {
+    const paramsUnduh = new URLSearchParams({
+      filter_mode: filterVisualisasiSaatIni.mode,
+      filter_value: filterVisualisasiSaatIni.value || "",
+      urut: urutSaatIni,
+    });
+    if (jenis === "stat") {
+      paramsUnduh.set("jenis", "stat");
+      paramsUnduh.set("field", kunci);
+    } else {
+      paramsUnduh.set("jenis", "keterangan");
+      paramsUnduh.set("label", kunci);
+    }
+    window.location.href = `/api/visualisasi/rincian/unduh?${paramsUnduh.toString()}`;
+  });
 }
 
 function renderBarKeterlambatan(data) {
@@ -1685,6 +1832,9 @@ function renderDonutKeterangan(data) {
 
   // Hover di legenda ikut menyorot segmen donutnya (interaksi timbal balik)
   // + tampilkan tooltip rincian yang sama (khususnya berguna untuk "Lainnya").
+  // FITUR BARU (11 Agu 2026): klik pada baris legenda (kecuali "Lainnya",
+  // yang merupakan gabungan label tak dikenal - tidak mewakili satu
+  // kategori pasti) membuka panel rincian per pegawai untuk kategori itu.
   document.querySelectorAll("#donutLegend .legenda-item").forEach((item) => {
     const s = segmen[Number(item.dataset.index)];
     const el = document.querySelector(`#donutChart .segmen-donut[data-index="${item.dataset.index}"]`);
@@ -1698,6 +1848,11 @@ function renderDonutKeterangan(data) {
       sembunyikanTooltip();
     });
     item.addEventListener("mousemove", (e) => tampilkanTooltip(isiTooltip(s), e.clientX, e.clientY));
+    if (s.label !== "Lainnya") {
+      item.addEventListener("click", () => bukaRincianKategori("keterangan", s.label, s.label));
+    } else {
+      item.style.cursor = "default";
+    }
   });
 }
 

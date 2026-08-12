@@ -655,7 +655,7 @@ def _terapkan_filter(q, mode, value, kolom_bidang="bidang"):
 
 
 def statistik_ringkas(mode="all", value=None):
-    q = supabase.table("ringkasan_pegawai").select("terlambat,sakit,alpha")
+    q = supabase.table("ringkasan_pegawai").select("terlambat,sakit,alpha,izin")
     q = _terapkan_filter(q, mode, value)
     rows = _ambil_semua(q)
     return {
@@ -663,6 +663,7 @@ def statistik_ringkas(mode="all", value=None):
         "telat": sum(r.get("terlambat") or 0 for r in rows),
         "alpha": sum(r.get("alpha") or 0 for r in rows),
         "sakit": sum(r.get("sakit") or 0 for r in rows),
+        "izin": sum(r.get("izin") or 0 for r in rows),
     }
 
 
@@ -676,6 +677,54 @@ def agregasi_keterangan(mode="all", value=None):
     for r in rows:
         k = r.get("keterangan") or "Tidak diketahui"
         hasil[k] = hasil.get(k, 0) + 1
+    return hasil
+
+
+# Kategori "utama" yang punya warna/baris tetap di donut chart (harus sama
+# persis dengan WARNA_KETERANGAN di dashboard.js) - dipakai untuk menandai
+# mana yang termasuk "Lainnya" pada rincian_kategori().
+KATEGORI_KETERANGAN_UTAMA = [
+    "WFO", "Libur", "Izin", "Dinas Luar", "Alpha", "Sakit", "Cuti",
+    "Cuti Alasan Penting", "Cuti Besar", "Cuti Belajar", "Lepas Piket",
+]
+
+
+def rincian_kategori(kategori, mode="all", value=None):
+    """FITUR BARU (11 Agu 2026): daftar SETIAP PEGAWAI beserta jumlah
+    kejadian untuk satu kategori tertentu (dipanggil saat admin klik salah
+    satu baris donut chart atau salah satu kartu statistik Telat/Sakit/
+    Izin/Alpha di Visualisasi), sesuai cakupan filter Batch/Tahun yang
+    sedang aktif. kategori="Telat" ditangani khusus (dari kolom
+    datang_telat, bukan keterangan), sisanya dicocokkan ke keterangan
+    harian (tidak peduli besar/kecil huruf, sama seperti donut chart).
+    Return list [{nama, nip, jumlah}], sudah diurutkan dari jumlah
+    terbanyak (frontend bisa menyusun ulang ke abjad kalau diminta)."""
+    q = supabase.table("attendance_records").select("nama,nip,keterangan,datang_telat")
+    q = _terapkan_filter(q, mode, value)
+    rows = _ambil_semua(q)
+
+    kategori_lower = kategori.strip().lower()
+    label_utama_lower = [k.lower() for k in KATEGORI_KETERANGAN_UTAMA]
+
+    hitung = {}  # nip -> {"nama":, "nip":, "jumlah":}
+    for r in rows:
+        if kategori_lower == "telat":
+            cocok = (r.get("datang_telat") or "-").strip() not in ("", "-")
+        else:
+            ket = (r.get("keterangan") or "").strip().lower()
+            if kategori_lower == "lainnya":
+                cocok = bool(ket) and ket not in label_utama_lower
+            else:
+                cocok = ket == kategori_lower
+        if not cocok:
+            continue
+        nip = r.get("nip") or "-"
+        if nip not in hitung:
+            hitung[nip] = {"nama": r.get("nama") or "-", "nip": nip, "jumlah": 0}
+        hitung[nip]["jumlah"] += 1
+
+    hasil = list(hitung.values())
+    hasil.sort(key=lambda x: -x["jumlah"])
     return hasil
 
 
@@ -711,9 +760,12 @@ def tren_bulanan(mode="all", value=None):
 
 
 def ranking_pegawai(field, mode="all", value=None, limit=5):
-    """field: 'alpha' atau 'terlambat'. Ranking dijumlah sesuai cakupan
-    filter, dikelompokkan per pegawai (by NIP) supaya lintas-batch tetap
-    terjumlah jadi satu jika mode='all' atau 'bidang'."""
+    """field: 'alpha', 'terlambat', 'sakit', 'izin', dst - kolom apa pun
+    di ringkasan_pegawai. Ranking dijumlah sesuai cakupan filter,
+    dikelompokkan per pegawai (by NIP) supaya lintas-batch tetap terjumlah
+    jadi satu jika mode='all' atau 'tahun'. limit=None -> semua pegawai
+    (dipakai FITUR BARU 11 Agu 2026: rincian lengkap saat kartu statistik
+    di Visualisasi diklik, bukan cuma top-N ranking singkat)."""
     q = supabase.table("ringkasan_pegawai").select(f"nama,nip,{field}")
     q = _terapkan_filter(q, mode, value)
     rows = _ambil_semua(q)
@@ -724,7 +776,36 @@ def ranking_pegawai(field, mode="all", value=None, limit=5):
             total[kunci] = {"nama": r["nama"], "nip": r.get("nip"), "jumlah": 0}
         total[kunci]["jumlah"] += r.get(field) or 0
     urut = sorted(total.values(), key=lambda x: x["jumlah"], reverse=True)
-    return [x for x in urut if x["jumlah"] > 0][:limit]
+    hasil = [x for x in urut if x["jumlah"] > 0]
+    return hasil[:limit] if limit else hasil
+
+
+def ranking_keterangan_harian(label, mode="all", value=None, limit=None):
+    """FITUR BARU (11 Agu 2026): rincian per pegawai untuk SATU kategori
+    Keterangan harian (mis. "WFO", "Libur", "Cuti Besar", "Dinas Luar") -
+    dipakai saat sebuah baris di legenda donat "Komposisi Keterangan"
+    diklik. Beda dari ranking_pegawai() yang membaca kolom ringkasan_
+    pegawai (cuma ada utk Terlambat/Sakit/Izin/Alpha/dst) - fungsi ini
+    menghitung LANGSUNG dari attendance_records, supaya kategori yang
+    tidak punya kolom ringkasan sendiri (WFO, Libur, 3 subtipe Cuti,
+    Lepas Piket) tetap bisa dirinci siapa saja pegawainya.
+
+    Pencocokan label case-insensitive, konsisten dengan cara donat sendiri
+    mengelompokkan data (lihat WARNA_KETERANGAN di dashboard.js)."""
+    q = supabase.table("attendance_records").select("nip,nama,keterangan")
+    q = _terapkan_filter(q, mode, value)
+    rows = _ambil_semua(q)
+    label_kecil = label.strip().lower()
+    total = {}
+    for r in rows:
+        if (r.get("keterangan") or "").strip().lower() != label_kecil:
+            continue
+        kunci = r.get("nip") or r.get("nama")
+        if kunci not in total:
+            total[kunci] = {"nama": r.get("nama") or "-", "nip": r.get("nip"), "jumlah": 0}
+        total[kunci]["jumlah"] += 1
+    urut = sorted(total.values(), key=lambda x: x["jumlah"], reverse=True)
+    return urut[:limit] if limit else urut
 
 
 def ambil_pengaturan(kunci, default=None):

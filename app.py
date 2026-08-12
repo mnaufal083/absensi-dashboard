@@ -21,6 +21,7 @@ from flask import (
 )
 from dotenv import load_dotenv
 from openpyxl import Workbook
+from openpyxl.styles import Font
 
 load_dotenv()
 
@@ -483,6 +484,87 @@ def visualisasi():
         # pegawai sekaligus.
         "ranking_terlambat": db.ranking_pegawai("terlambat", mode, value, limit=15),
     })
+
+
+# Kolom ringkasan_pegawai yang boleh diminta lewat kartu statistik yang
+# bisa diklik - whitelist ini SENGAJA dijaga ketat (bukan menerima nama
+# field bebas dari query string) karena nilainya ditempel langsung ke
+# string SELECT Supabase (lihat db.py::ranking_pegawai).
+_FIELD_STAT_DIIZINKAN = {"terlambat", "sakit", "izin", "alpha"}
+
+
+@app.route("/api/visualisasi/rincian")
+@login_required
+def api_visualisasi_rincian():
+    """FITUR BARU (11 Agu 2026): dipanggil saat kartu statistik (Telat/
+    Sakit/Izin/Alpha) ATAU baris legenda donat Komposisi Keterangan di
+    Visualisasi diklik - mengembalikan daftar LENGKAP semua pegawai untuk
+    kategori itu (bukan cuma top-N ringkasan singkat), supaya bisa
+    ditampilkan sebagai tabel rincian yang bisa diurutkan nama/jumlah."""
+    mode = request.args.get("filter_mode", "all")
+    value = request.args.get("filter_value")
+    jenis = request.args.get("jenis")  # 'stat' | 'keterangan'
+    if jenis == "stat":
+        field = request.args.get("field", "")
+        if field not in _FIELD_STAT_DIIZINKAN:
+            return jsonify({"ok": False, "pesan": "Field tidak dikenal."}), 400
+        return jsonify(db.ranking_pegawai(field, mode, value, limit=None))
+    if jenis == "keterangan":
+        label = request.args.get("label", "")
+        return jsonify(db.ranking_keterangan_harian(label, mode, value))
+    return jsonify({"ok": False, "pesan": "Jenis rincian tidak dikenal."}), 400
+
+
+@app.route("/api/visualisasi/rincian/unduh")
+@login_required
+def api_visualisasi_rincian_unduh():
+    """Unduh rincian yang sama (lihat api_visualisasi_rincian) sebagai
+    laporan Excel - dipakai tombol "Unduh sebagai laporan" di panel
+    rincian kategori Visualisasi."""
+    mode = request.args.get("filter_mode", "all")
+    value = request.args.get("filter_value")
+    jenis = request.args.get("jenis")
+    urut = request.args.get("urut", "jumlah")  # 'jumlah' | 'nama'
+
+    if jenis == "stat":
+        field = request.args.get("field", "")
+        if field not in _FIELD_STAT_DIIZINKAN:
+            return jsonify({"ok": False, "pesan": "Field tidak dikenal."}), 400
+        data = db.ranking_pegawai(field, mode, value, limit=None)
+        judul = field.capitalize()
+    elif jenis == "keterangan":
+        judul = request.args.get("label", "")
+        data = db.ranking_keterangan_harian(judul, mode, value)
+    else:
+        return jsonify({"ok": False, "pesan": "Jenis rincian tidak dikenal."}), 400
+
+    if urut == "nama":
+        data = sorted(data, key=lambda x: (x.get("nama") or "").lower())
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Rincian"
+    label_periode = value if mode in ("tahun", "batch") and value else "Seluruh Batch"
+    ws.append([f"Rincian {judul} — {label_periode}"])
+    ws.merge_cells("A1:D1")
+    ws["A1"].font = Font(bold=True, size=13)
+    ws.append([])
+    ws.append(["No", "Nama", "NIP", "Jumlah Hari"])
+    for sel in ws[3]:
+        sel.font = Font(bold=True)
+    for i, d in enumerate(data, 1):
+        ws.append([i, d.get("nama") or "-", d.get("nip") or "-", d.get("jumlah") or 0])
+    for kolom, lebar in zip("ABCD", (5, 34, 22, 12)):
+        ws.column_dimensions[kolom].width = lebar
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    nama_file = f"rincian_{judul.replace(' ', '_')}.xlsx"
+    return send_file(
+        buf, as_attachment=True, download_name=nama_file,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.route("/api/cari-pegawai")
