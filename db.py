@@ -815,6 +815,9 @@ def ranking_lainnya(mode="all", value=None, kategori_dikenal=None):
             total[kunci] = {"nama": r.get("nama") or "-", "nip": r.get("nip"), "label_asli": label_asli, "jumlah": 0}
         total[kunci]["jumlah"] += 1
     return sorted(total.values(), key=lambda x: x["jumlah"], reverse=True)
+
+
+def ranking_keterangan_harian(label, mode="all", value=None, limit=None):
     """FITUR BARU (11 Agu 2026): rincian per pegawai untuk SATU kategori
     Keterangan harian (mis. "WFO", "Libur", "Cuti Besar", "Dinas Luar") -
     dipakai saat sebuah baris di legenda donat "Komposisi Keterangan"
