@@ -492,6 +492,15 @@ def visualisasi():
 # string SELECT Supabase (lihat db.py::ranking_pegawai).
 _FIELD_STAT_DIIZINKAN = {"terlambat", "sakit", "izin", "alpha"}
 
+# Daftar kategori Keterangan resmi - HARUS selalu sama persis dengan daftar
+# di dashboard.js::WARNA_KETERANGAN (dipakai buat legenda donat), supaya
+# kategori "Lainnya" (label yang TIDAK ada di daftar ini) konsisten antara
+# apa yang ditampilkan di donat dan apa yang muncul saat diklik.
+_KATEGORI_KETERANGAN_RESMI = [
+    "WFO", "Libur", "Izin", "Dinas Luar", "Alpha", "Sakit",
+    "Cuti", "Cuti Alasan Penting", "Cuti Besar", "Cuti Belajar", "Lepas Piket",
+]
+
 
 @app.route("/api/visualisasi/rincian")
 @login_required
@@ -503,7 +512,7 @@ def api_visualisasi_rincian():
     ditampilkan sebagai tabel rincian yang bisa diurutkan nama/jumlah."""
     mode = request.args.get("filter_mode", "all")
     value = request.args.get("filter_value")
-    jenis = request.args.get("jenis")  # 'stat' | 'keterangan'
+    jenis = request.args.get("jenis")  # 'stat' | 'keterangan' | 'lainnya'
     if jenis == "stat":
         field = request.args.get("field", "")
         if field not in _FIELD_STAT_DIIZINKAN:
@@ -512,6 +521,8 @@ def api_visualisasi_rincian():
     if jenis == "keterangan":
         label = request.args.get("label", "")
         return jsonify(db.ranking_keterangan_harian(label, mode, value))
+    if jenis == "lainnya":
+        return jsonify(db.ranking_lainnya(mode, value, _KATEGORI_KETERANGAN_RESMI))
     return jsonify({"ok": False, "pesan": "Jenis rincian tidak dikenal."}), 400
 
 
@@ -525,6 +536,7 @@ def api_visualisasi_rincian_unduh():
     value = request.args.get("filter_value")
     jenis = request.args.get("jenis")
     urut = request.args.get("urut", "jumlah")  # 'jumlah' | 'nama'
+    kolom_label_asli = False
 
     if jenis == "stat":
         field = request.args.get("field", "")
@@ -535,6 +547,10 @@ def api_visualisasi_rincian_unduh():
     elif jenis == "keterangan":
         judul = request.args.get("label", "")
         data = db.ranking_keterangan_harian(judul, mode, value)
+    elif jenis == "lainnya":
+        judul = "Lainnya"
+        data = db.ranking_lainnya(mode, value, _KATEGORI_KETERANGAN_RESMI)
+        kolom_label_asli = True
     else:
         return jsonify({"ok": False, "pesan": "Jenis rincian tidak dikenal."}), 400
 
@@ -545,16 +561,22 @@ def api_visualisasi_rincian_unduh():
     ws = wb.active
     ws.title = "Rincian"
     label_periode = value if mode in ("tahun", "batch") and value else "Seluruh Batch"
+    lebar_kolom = "ABCDE" if kolom_label_asli else "ABCD"
     ws.append([f"Rincian {judul} — {label_periode}"])
-    ws.merge_cells("A1:D1")
+    ws.merge_cells(f"A1:{lebar_kolom[-1]}1")
     ws["A1"].font = Font(bold=True, size=13)
     ws.append([])
-    ws.append(["No", "Nama", "NIP", "Jumlah Hari"])
+    header = ["No", "Nama", "NIP", "Label Asli", "Jumlah Hari"] if kolom_label_asli else ["No", "Nama", "NIP", "Jumlah Hari"]
+    ws.append(header)
     for sel in ws[3]:
         sel.font = Font(bold=True)
     for i, d in enumerate(data, 1):
-        ws.append([i, d.get("nama") or "-", d.get("nip") or "-", d.get("jumlah") or 0])
-    for kolom, lebar in zip("ABCD", (5, 34, 22, 12)):
+        baris = [i, d.get("nama") or "-", d.get("nip") or "-"]
+        if kolom_label_asli:
+            baris.append(d.get("label_asli") or "-")
+        baris.append(d.get("jumlah") or 0)
+        ws.append(baris)
+    for kolom, lebar in zip(lebar_kolom, (5, 34, 22, 20, 12) if kolom_label_asli else (5, 34, 22, 12)):
         ws.column_dimensions[kolom].width = lebar
 
     buf = io.BytesIO()

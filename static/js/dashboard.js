@@ -1371,7 +1371,7 @@ const WARNA_KETERANGAN = {
 const WARNA_LAINNYA = "#CBD5E1"; // fallback untuk label tak dikenal (mis. data lama)
 
 async function renderVisualisasi() {
-  const [batches, jumlahRiil] = await Promise.all([api("/api/batches"), api("/api/pengaturan/jumlah_pegawai_riil")]);
+  const batches = await api("/api/batches");
 
   // FITUR BARU (1 Agu 2026): dulu cuma ada "Seluruh Batch (akumulasi)" -
   // yang berarti SEMUA batch sejak sistem dipakai pertama kali, tanpa
@@ -1416,21 +1416,18 @@ async function renderVisualisasi() {
     </div>
 
     <div class="grid-2" style="margin-bottom:14px;align-items:stretch">
-      <div class="kartu">
+      <div class="kartu" style="display:flex;flex-direction:column">
         <p class="stat-label" style="font-weight:600;margin-bottom:12px">${ICONS.pie} Komposisi Keterangan <span id="labelDonut" style="font-weight:400;color:var(--teks-muted)"></span></p>
-        <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+        <div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap;flex:1">
           <div id="donutChart"></div>
-          <div id="donutLegend" style="flex:1;min-width:220px"></div>
+          <div id="donutLegend" style="flex:1;min-width:220px;max-width:100%;overflow:hidden"></div>
         </div>
       </div>
       <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:12px">
         <div class="kartu">
           <p class="stat-label">${ICONS.users} Total Data Pegawai Terekap</p>
           <p class="stat-angka" id="statTotal">-</p>
-          <p style="font-size:11px;color:var(--teks-muted);margin:2px 0 0">
-            dari ≈ <span id="statJumlahRiil">${jumlahRiil.nilai || "?"}</span> pegawai riil
-            <button type="button" id="btnEditJumlahRiil" title="Ubah angka referensi" style="border:none;background:none;color:var(--biru);cursor:pointer;font-size:11px;padding:0 0 0 4px">✎ ubah</button>
-          </p>
+          <p style="font-size:11px;color:var(--teks-muted);margin:2px 0 0">≈ <span id="statPegawaiUnik">-</span> pegawai unik pada cakupan ini</p>
         </div>
         <div class="kartu kartu-klik" data-jenis="stat" data-field="terlambat" data-label="Telat">
           <p class="stat-label">${ICONS.clock} Telat (hari)</p><p class="stat-angka" style="color:#2563EB" id="statTelat">-</p>
@@ -1472,7 +1469,6 @@ async function renderVisualisasi() {
   `;
 
   document.getElementById("filterBatch").addEventListener("change", muatDataVisualisasi);
-  document.getElementById("btnEditJumlahRiil").addEventListener("click", editJumlahPegawaiRiil);
   // FITUR BARU (11 Agu 2026): klik kartu Telat/Sakit/Izin/Alpha membuka
   // panel rincian per pegawai untuk metrik itu.
   document.querySelectorAll(".kartu-klik").forEach((kartu) => {
@@ -1480,19 +1476,6 @@ async function renderVisualisasi() {
   });
 
   muatDataVisualisasi();
-}
-
-async function editJumlahPegawaiRiil() {
-  const sekarang = document.getElementById("statJumlahRiil").textContent;
-  const input = prompt("Isi jumlah pegawai riil kantor (angka referensi, diisi manual - tidak dihitung otomatis dari data):", sekarang === "?" ? "" : sekarang);
-  if (input === null) return;
-  const angka = parseInt(input, 10);
-  if (isNaN(angka) || angka < 0) {
-    alert("Masukkan angka yang valid.");
-    return;
-  }
-  await api("/api/pengaturan/jumlah_pegawai_riil", { method: "PUT", body: JSON.stringify({ nilai: angka }) });
-  document.getElementById("statJumlahRiil").textContent = angka;
 }
 
 async function muatDataVisualisasi() {
@@ -1519,6 +1502,7 @@ async function muatDataVisualisasi() {
   const viz = await api(`/api/visualisasi?filter_mode=${mode}&filter_value=${encodeURIComponent(value)}`);
 
   document.getElementById("statTotal").textContent = viz.statistik.total_pegawai;
+  document.getElementById("statPegawaiUnik").textContent = viz.statistik.pegawai_unik;
   document.getElementById("statTelat").textContent = viz.statistik.telat;
   document.getElementById("statSakit").textContent = viz.statistik.sakit;
   document.getElementById("statIzin").textContent = viz.statistik.izin;
@@ -1551,12 +1535,16 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
   const overlay = document.createElement("div");
   overlay.id = "modalRincianOverlay";
   overlay.className = "modal-overlay";
+  const subJudul =
+    jenis === "lainnya"
+      ? "Label Keterangan yang belum ada di daftar kategori resmi - kemungkinan perlu dimigrasikan/dikoreksi"
+      : filterVisualisasiSaatIni.label;
   overlay.innerHTML = `
     <div class="modal-box">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px">
         <div>
           <p style="font-size:15px;font-weight:700;margin:0" class="judul-serif">Rincian ${labelTampil}</p>
-          <p style="font-size:11.5px;color:var(--teks-muted);margin:2px 0 0">${filterVisualisasiSaatIni.label}</p>
+          <p style="font-size:11.5px;color:var(--teks-muted);margin:2px 0 0">${subJudul}</p>
         </div>
         <button type="button" id="btnTutupModalRincian" aria-label="Tutup" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--teks-muted);line-height:1">✕</button>
       </div>
@@ -1586,6 +1574,8 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
   if (jenis === "stat") {
     paramsAmbil.set("jenis", "stat");
     paramsAmbil.set("field", kunci);
+  } else if (jenis === "lainnya") {
+    paramsAmbil.set("jenis", "lainnya");
   } else {
     paramsAmbil.set("jenis", "keterangan");
     paramsAmbil.set("label", kunci);
@@ -1594,10 +1584,13 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
   const data = await api(`/api/visualisasi/rincian?${paramsAmbil.toString()}`);
   if (!overlay.isConnected) return; // modal sudah ditutup sebelum data selesai dimuat
   let urutSaatIni = "jumlah";
+  const adaLabelAsli = jenis === "lainnya"; // kolom tambahan khusus kategori "Lainnya"
 
   function renderIsiRincian() {
     const kataKunci = (document.getElementById("rincianCari")?.value || "").trim().toLowerCase();
-    let tampil = (data || []).filter((d) => !kataKunci || `${d.nama || ""} ${d.nip || ""}`.toLowerCase().includes(kataKunci));
+    let tampil = (data || []).filter(
+      (d) => !kataKunci || `${d.nama || ""} ${d.nip || ""} ${d.label_asli || ""}`.toLowerCase().includes(kataKunci)
+    );
     tampil = [...tampil].sort((a, b) =>
       urutSaatIni === "nama" ? (a.nama || "").localeCompare(b.nama || "") : (b.jumlah || 0) - (a.jumlah || 0)
     );
@@ -1607,23 +1600,25 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
       isi.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic;padding:14px 0">Tidak ada data untuk kategori ini pada cakupan yang dipilih.</p>`;
       return;
     }
+    const grid = adaLabelAsli ? "0.5fr 1.8fr 1.2fr 1.3fr 1fr" : "0.5fr 2fr 1.4fr 1fr";
     isi.innerHTML = `
       <div class="tabel-wrap">
-        <div class="tabel-header-baris" style="grid-template-columns:0.5fr 2fr 1.4fr 1fr">
-          <span>NO</span><span>NAMA</span><span>NIP</span><span>JUMLAH HARI</span>
+        <div class="tabel-header-baris" style="grid-template-columns:${grid}">
+          <span>NO</span><span>NAMA</span><span>NIP</span>${adaLabelAsli ? "<span>LABEL ASLI</span>" : ""}<span>JUMLAH HARI</span>
         </div>
         <div style="max-height:52vh;overflow-y:auto">
           ${tampil
             .map(
-              (d, i) => `<div class="tabel-baris" style="grid-template-columns:0.5fr 2fr 1.4fr 1fr">
+              (d, i) => `<div class="tabel-baris" style="grid-template-columns:${grid}">
               <span>${i + 1}</span><span>${d.nama || "-"}</span><span>${d.nip || "-"}</span>
+              ${adaLabelAsli ? `<span style="color:var(--teks-muted);font-style:italic">${d.label_asli || "-"}</span>` : ""}
               <span style="font-weight:600">${d.jumlah} hari</span>
             </div>`
             )
             .join("")}
         </div>
       </div>
-      <p style="font-size:11px;color:var(--teks-muted);margin:8px 0 0">${tampil.length} pegawai ditampilkan.</p>
+      <p style="font-size:11px;color:var(--teks-muted);margin:8px 0 0">${tampil.length} baris ditampilkan.</p>
     `;
   }
 
@@ -1647,6 +1642,8 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
     if (jenis === "stat") {
       paramsUnduh.set("jenis", "stat");
       paramsUnduh.set("field", kunci);
+    } else if (jenis === "lainnya") {
+      paramsUnduh.set("jenis", "lainnya");
     } else {
       paramsUnduh.set("jenis", "keterangan");
       paramsUnduh.set("label", kunci);
@@ -1753,7 +1750,13 @@ function renderDonutKeterangan(data) {
   if (jumlahLainnya > 0) entri.push(["Lainnya", jumlahLainnya]);
 
   const total = entri.reduce((s, [, v]) => s + v, 0);
-  const r = 52, cx = 60, cy = 60, keliling = 2 * Math.PI * r;
+  // PERBAIKAN (11 Agu 2026): diperbesar secukupnya (r 52->64, SVG
+  // 130->160px) supaya kartu ini lebih mengisi tinggi yang sama dengan
+  // grid 5 kartu statistik di sebelahnya - TIDAK dibuat sebesar mungkin,
+  // karena donat yang terlalu besar menyisakan terlalu sedikit ruang
+  // horizontal untuk legenda, membuat label panjang seperti "Cuti Alasan
+  // Penting" jadi terpotong ellipsis sampai tidak terbaca.
+  const r = 64, cx = 72, cy = 72, keliling = 2 * Math.PI * r;
   let sudutSoFar = 0;
 
   const segmen = entri.map(([label, jumlah], i) => {
@@ -1766,16 +1769,16 @@ function renderDonutKeterangan(data) {
   const lingkaran = segmen
     .map(
       (s) => `<circle class="segmen-donut" data-index="${s.i}" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.warna}"
-      stroke-width="18" stroke-dasharray="0 ${keliling}" stroke-dashoffset="${s.offsetMulai}" />`
+      stroke-width="21" stroke-dasharray="0 ${keliling}" stroke-dashoffset="${s.offsetMulai}" />`
     )
     .join("");
 
   document.getElementById("donutChart").innerHTML = `
-    <div style="position:relative;width:130px;height:130px">
-      <svg width="130" height="130" viewBox="0 0 120 120" style="transform:rotate(-90deg)">${lingkaran}</svg>
+    <div style="position:relative;width:160px;height:160px;flex-shrink:0">
+      <svg width="160" height="160" viewBox="0 0 144 144" style="transform:rotate(-90deg)">${lingkaran}</svg>
       <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
-        <span style="font-size:19px;font-weight:700;color:var(--teks-utama)">${total}</span>
-        <span style="font-size:10px;color:var(--teks-muted)">hari tercatat</span>
+        <span style="font-size:23px;font-weight:700;color:var(--teks-utama)">${total}</span>
+        <span style="font-size:11px;color:var(--teks-muted)">hari tercatat</span>
       </div>
     </div>
   `;
@@ -1805,25 +1808,28 @@ function renderDonutKeterangan(data) {
   // Hover di segmen donut: sorot + tampilkan tooltip rinciannya
   elemenLingkaran.forEach((el, idx) => {
     const s = segmen[idx];
-    el.addEventListener("mouseenter", () => el.setAttribute("stroke-width", "22"));
-    el.addEventListener("mouseleave", () => { el.setAttribute("stroke-width", "18"); sembunyikanTooltip(); });
+    el.addEventListener("mouseenter", () => el.setAttribute("stroke-width", "27"));
+    el.addEventListener("mouseleave", () => { el.setAttribute("stroke-width", "21"); sembunyikanTooltip(); });
     el.addEventListener("mousemove", (e) => tampilkanTooltip(isiTooltip(s), e.clientX, e.clientY));
   });
 
-  // Legenda disusun 2 kolom x 6 baris (kolom pertama terisi dulu dari atas
-  // ke bawah, baru lanjut ke kolom kedua) - 11 kategori tetap + "Lainnya"
-  // kalau ada label yang benar-benar tak dikenali, supaya susunannya
-  // konsisten dan gampang dibaca sekilas antar batch.
+  // PERBAIKAN (11 Agu 2026): dulu dipaksa 2 kolom tetap (grid-auto-flow:
+  // column) - kalau kartu sedang sempit, label panjang seperti "Cuti
+  // Alasan Penting" jadi terpotong ellipsis sampai tidak terbaca. Sekarang
+  // pakai grid RESPONSIF (auto-fit + minmax) - otomatis 2 kolom kalau
+  // muat, turun jadi 1 kolom kalau ruangnya sempit, jadi label tidak
+  // pernah dipaksa muat di ruang yang terlalu kecil. 11 kategori tetap +
+  // "Lainnya" kalau ada label yang benar-benar tak dikenali.
   document.getElementById("donutLegend").innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;grid-auto-flow:column;grid-template-rows:repeat(6,auto);gap:2px 10px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:4px 10px">
       ${segmen
         .map(
-          (s) => `<div class="legenda-item" data-index="${s.i}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 6px;font-size:12px;border-radius:6px;cursor:pointer;transition:background-color .15s">
-          <span style="display:flex;align-items:center;gap:6px;color:var(--teks-utama);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-            <span style="width:9px;height:9px;border-radius:3px;background:${s.warna};display:inline-block;flex-shrink:0"></span>
-            ${s.label}
+          (s) => `<div class="legenda-item" data-index="${s.i}" style="display:flex;justify-content:space-between;align-items:center;padding:8px 9px;font-size:13px;border-radius:7px;cursor:pointer;transition:background-color .15s;min-width:0">
+          <span style="display:flex;align-items:center;gap:7px;color:var(--teks-utama);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">
+            <span style="width:10px;height:10px;border-radius:3px;background:${s.warna};display:inline-block;flex-shrink:0"></span>
+            <span style="overflow:hidden;text-overflow:ellipsis">${s.label}</span>
           </span>
-          <span style="color:var(--teks-sekunder);white-space:nowrap;padding-left:6px">${s.jumlah} (${total > 0 ? ((s.jumlah / total) * 100).toFixed(1) : "0.0"}%)</span>
+          <span style="color:var(--teks-sekunder);white-space:nowrap;padding-left:6px;font-size:11.5px;flex-shrink:0">${s.jumlah} (${total > 0 ? ((s.jumlah / total) * 100).toFixed(1) : "0.0"}%)</span>
         </div>`
         )
         .join("")}
@@ -1840,18 +1846,25 @@ function renderDonutKeterangan(data) {
     const el = document.querySelector(`#donutChart .segmen-donut[data-index="${item.dataset.index}"]`);
     item.addEventListener("mouseenter", () => {
       item.style.backgroundColor = "var(--abu-bg)";
-      if (el) el.setAttribute("stroke-width", "22");
+      if (el) el.setAttribute("stroke-width", "27");
     });
     item.addEventListener("mouseleave", () => {
       item.style.backgroundColor = "transparent";
-      if (el) el.setAttribute("stroke-width", "18");
+      if (el) el.setAttribute("stroke-width", "21");
       sembunyikanTooltip();
     });
     item.addEventListener("mousemove", (e) => tampilkanTooltip(isiTooltip(s), e.clientX, e.clientY));
     if (s.label !== "Lainnya") {
       item.addEventListener("click", () => bukaRincianKategori("keterangan", s.label, s.label));
     } else {
-      item.style.cursor = "default";
+      // PERBAIKAN (11 Agu 2026): dulu "Lainnya" sengaja TIDAK bisa diklik
+      // (cursor:default) karena bukan satu label tunggal - tapi itu
+      // artinya isinya tidak pernah kelihatan kecuali lewat tooltip hover
+      // (gampang terlewat). Sekarang tetap bisa diklik, mengarah ke jenis
+      // rincian khusus 'lainnya' yang menampilkan label ASLI apa adanya
+      // per pegawai (lihat db.py::ranking_lainnya), bukan mencoba
+      // memaksakan satu nama kategori yang tidak ada.
+      item.addEventListener("click", () => bukaRincianKategori("lainnya", null, "Lainnya"));
     }
   });
 }

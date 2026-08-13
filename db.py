@@ -655,11 +655,22 @@ def _terapkan_filter(q, mode, value, kolom_bidang="bidang"):
 
 
 def statistik_ringkas(mode="all", value=None):
-    q = supabase.table("ringkasan_pegawai").select("terlambat,sakit,alpha,izin")
+    q = supabase.table("ringkasan_pegawai").select("nip,terlambat,sakit,alpha,izin")
     q = _terapkan_filter(q, mode, value)
     rows = _ambil_semua(q)
     return {
+        # PERBAIKAN (11 Agu 2026): "total_pegawai" tetap jumlah BARIS
+        # (bisa lebih besar dari headcount asli kalau satu pegawai muncul
+        # di banyak batch/bulan dalam cakupan filter) - ini memang makna
+        # aslinya "Total DATA Pegawai TEREKAP", bukan headcount. Sekarang
+        # ditambah "pegawai_unik" = jumlah NIP UNIK dalam cakupan yang
+        # sama, dihitung OTOMATIS dari data (bukan lagi angka referensi
+        # manual yang harus diisi tangan dan tidak memengaruhi apa pun) -
+        # supaya konsepnya pasti/deterministik: dua angka nyata dengan
+        # makna yang jelas beda, bukan satu angka asli + satu angka
+        # tebakan yang bisa menyimpang dari kenyataan.
         "total_pegawai": len(rows),
+        "pegawai_unik": len({r.get("nip") for r in rows if r.get("nip")}),
         "telat": sum(r.get("terlambat") or 0 for r in rows),
         "alpha": sum(r.get("alpha") or 0 for r in rows),
         "sakit": sum(r.get("sakit") or 0 for r in rows),
@@ -780,7 +791,30 @@ def ranking_pegawai(field, mode="all", value=None, limit=5):
     return hasil[:limit] if limit else hasil
 
 
-def ranking_keterangan_harian(label, mode="all", value=None, limit=None):
+def ranking_lainnya(mode="all", value=None, kategori_dikenal=None):
+    """FITUR BARU (11 Agu 2026): rincian untuk kategori "Lainnya" di donat -
+    beda dari ranking_keterangan_harian() karena "Lainnya" BUKAN satu label
+    tunggal, melainkan gabungan dari SEMUA label yang tidak cocok dengan
+    daftar kategori resmi (kategori_dikenal, case-insensitive) - mis. sisa
+    "Hadir" lama yang belum sempat dimigrasikan, atau label kustom lain.
+    Baris hasilnya menyertakan label ASLI apa adanya (bukan disamarkan),
+    supaya admin bisa langsung tahu persis apa yang perlu dibereskan/
+    dimigrasikan, per pegawai."""
+    dikenal_kecil = {k.strip().lower() for k in (kategori_dikenal or [])}
+    q = supabase.table("attendance_records").select("nip,nama,keterangan")
+    q = _terapkan_filter(q, mode, value)
+    rows = _ambil_semua(q)
+    total = {}
+    for r in rows:
+        label_asli = (r.get("keterangan") or "Tidak diketahui").strip() or "Tidak diketahui"
+        if label_asli.lower() in dikenal_kecil:
+            continue
+        nip = r.get("nip") or r.get("nama")
+        kunci = (nip, label_asli)  # dipecah per (pegawai, label asli) supaya rinciannya jelas
+        if kunci not in total:
+            total[kunci] = {"nama": r.get("nama") or "-", "nip": r.get("nip"), "label_asli": label_asli, "jumlah": 0}
+        total[kunci]["jumlah"] += 1
+    return sorted(total.values(), key=lambda x: x["jumlah"], reverse=True)
     """FITUR BARU (11 Agu 2026): rincian per pegawai untuk SATU kategori
     Keterangan harian (mis. "WFO", "Libur", "Cuti Besar", "Dinas Luar") -
     dipakai saat sebuah baris di legenda donat "Komposisi Keterangan"
