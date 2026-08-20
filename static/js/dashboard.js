@@ -55,6 +55,58 @@ let rankingSaatIni = { terlambat: [], alpha: [] }; // dipakai toggle Keterlambat
 const currentUserId = document.body.dataset.userId || null;
 
 // ---------------------------------------------------------------------
+// MODAL KONFIRMASI (kustom, menggantikan confirm() bawaan browser)
+// ---------------------------------------------------------------------
+// ROMBAK (20 Agu 2026): dialog confirm() bawaan browser tidak bisa
+// distyle sama sekali - selalu tampil sebagai kotak polos bawaan OS
+// ("127.0.0.1:5000 says...") yang kontras banget dengan tampilan sistem
+// yang sudah dirapikan di tempat lain. Sekarang semua konfirmasi (hapus
+// batch, hapus akun, dst) pakai modal kustom yang gayanya konsisten
+// dengan modal Rincian Kategori - ada judul, ikon status (bahaya=merah
+// untuk aksi yang tidak bisa dibatalkan, biasa=biru), dan tombol yang
+// jelas beda warna antara "Batal" (aman, abu-abu) vs tombol tindakan
+// (merah kalau destruktif, biru kalau bukan). Dipakai seperti confirm()
+// biasa tapi async: `if (!(await konfirmasi("Yakin?"))) return;`
+function konfirmasi(pesan, { judul = "Konfirmasi", labelOk = "Ya, lanjutkan", labelBatal = "Batal", bahaya = false } = {}) {
+  return new Promise((resolve) => {
+    document.getElementById("modalKonfirmasiOverlay")?.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "modalKonfirmasiOverlay";
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal-box" style="width:420px;max-width:100%">
+        <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:20px">
+          <span style="flex-shrink:0;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${bahaya ? "var(--merah-bg)" : "var(--biru-muda-bg)"};color:${bahaya ? "var(--merah-teks)" : "var(--biru)"}">${bahaya ? ICONS.alertTri : ICONS.check}</span>
+          <div style="min-width:0">
+            <p style="font-size:14.5px;font-weight:700;margin:0 0 5px" class="judul-serif">${judul}</p>
+            <p style="font-size:12.5px;color:var(--teks-sekunder);margin:0;line-height:1.55;white-space:pre-line">${pesan}</p>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button type="button" class="btn-sekunder" id="btnKonfirmasiBatal">${labelBatal}</button>
+          <button type="button" class="${bahaya ? "btn-bahaya" : "btn-primer"}" id="btnKonfirmasiOk">${labelOk}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const tutup = (hasil) => {
+      overlay.remove();
+      document.removeEventListener("keydown", escHandler);
+      resolve(hasil);
+    };
+    function escHandler(e) {
+      if (e.key === "Escape") tutup(false);
+    }
+    document.addEventListener("keydown", escHandler);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) tutup(false); });
+    document.getElementById("btnKonfirmasiBatal").addEventListener("click", () => tutup(false));
+    document.getElementById("btnKonfirmasiOk").addEventListener("click", () => tutup(true));
+    document.getElementById("btnKonfirmasiOk").focus();
+  });
+}
+
+// ---------------------------------------------------------------------
 // ROUTING SIDEBAR
 // ---------------------------------------------------------------------
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -355,7 +407,7 @@ async function renderBeranda() {
         <p class="stat-klik-hint">${data.perlu_ditinjau ? "lihat daftar ↓" : "semua sudah final"}</p>
       </div>
       <div class="kartu">
-        <p class="stat-label">Pegawai Unik</p>
+        <p class="stat-label">Pegawai</p>
         <p class="stat-angka" id="berandaPegawaiUnik">${data.pegawai_unik}</p>
         <p style="font-size:10.5px;color:var(--teks-muted);margin:2px 0 0" id="berandaLabelUnik">tahun ${tahunSekarang}</p>
       </div>
@@ -507,6 +559,17 @@ function bukaPegawaiDariBeranda(nip, nama) {
     input.value = nip || nama;
     input.dispatchEvent(new Event("input"));
   }
+}
+
+// FITUR BARU (19 Agu 2026): sama seperti bukaPegawaiDariBeranda, tapi
+// dipanggil dari BARIS PEGAWAI di dalam modal "Rincian Kategori" (baik
+// tabel matriks bulanan Jan..Des maupun tabel "Lainnya") - tutup dulu
+// modalnya, baru lompat ke tab Cari Pegawai supaya pengguna langsung
+// melihat rincian kehadiran lengkap pegawai itu tanpa perlu menutup
+// modal secara manual dulu.
+function bukaPegawaiDariRincian(nip, nama) {
+  document.getElementById("modalRincianOverlay")?.remove();
+  bukaPegawaiDariBeranda(nip, nama);
 }
 
 function renderPotonganAktivitas(daftar) {
@@ -1341,8 +1404,9 @@ async function ubahStatusBatch(batchId, statusBaru) {
 
 async function unduhBatch(batchId, statusSaatIni) {
   if (statusSaatIni !== "final") {
-    const lanjut = confirm(
-      'Batch ini masih berstatus Draf. Excel cuma bisa diunduh dari batch yang sudah Final (supaya rekap yang terunduh selalu data yang sudah "dikunci").\n\nTandai Final sekarang dan lanjut unduh?'
+    const lanjut = await konfirmasi(
+      'Batch ini masih berstatus Draf. Excel cuma bisa diunduh dari batch yang sudah Final (supaya rekap yang terunduh selalu data yang sudah "dikunci").\n\nTandai Final sekarang dan lanjut unduh?',
+      { judul: "Batch belum Final", labelOk: "Ya, tandai Final & unduh" }
     );
     if (!lanjut) return;
     const res = await api(`/api/batches/${batchId}/final`, { method: "POST" });
@@ -1356,7 +1420,12 @@ async function unduhBatch(batchId, statusSaatIni) {
 }
 
 async function hapusBatch(batchId) {
-  if (!confirm("Hapus batch ini beserta seluruh datanya? Tindakan ini tidak bisa dibatalkan.")) return;
+  const lanjut = await konfirmasi("Hapus batch ini beserta seluruh datanya? Tindakan ini tidak bisa dibatalkan.", {
+    judul: "Hapus batch ini?",
+    labelOk: "Ya, hapus batch",
+    bahaya: true,
+  });
+  if (!lanjut) return;
   await api(`/api/batches/${batchId}`, { method: "DELETE" });
   gotoTab("riwayat");
 }
@@ -1488,6 +1557,7 @@ const WARNA_LAINNYA = "#CBD5E1"; // fallback untuk label tak dikenal (mis. data 
 
 async function renderVisualisasi() {
   const batches = await api("/api/batches");
+  const tahunSekarang = String(new Date().getFullYear());
 
   // FITUR BARU (1 Agu 2026): dulu cuma ada "Seluruh Batch (akumulasi)" -
   // yang berarti SEMUA batch sejak sistem dipakai pertama kali, tanpa
@@ -1498,6 +1568,14 @@ async function renderVisualisasi() {
   // di awal tiap kelompok - jadi ada jenjang: 1 batch -> akumulasi 1 tahun
   // -> akumulasi seluruh sejarah (opsi paling atas, tetap ada untuk yang
   // memang butuh gambaran total keseluruhan).
+  //
+  // ROMBAK (20 Agu 2026): dulu default yang otomatis terpilih saat tab ini
+  // dibuka adalah "Seluruh Batch (akumulasi total)" - kesan pertama yang
+  // dilihat jadi angka yang terus menumpuk sejak sistem dipakai pertama
+  // kali (bertahun-tahun), bukan gambaran yang relevan untuk operasional
+  // sehari-hari. Sekarang default-nya "Tahun berjalan" (kalau ada batch di
+  // tahun ini) - "Seluruh Batch" tetap ada di dropdown untuk yang memang
+  // butuh gambaran total historis.
   const batchPerTahun = {};
   batches.forEach((b) => {
     const tahun = (b.periode_akhir || b.dibuat_pada || "").slice(0, 4) || "Tanpa periode";
@@ -1505,6 +1583,7 @@ async function renderVisualisasi() {
     batchPerTahun[tahun].push(b);
   });
   const daftarTahun = Object.keys(batchPerTahun).sort((a, b) => b.localeCompare(a));
+  const adaTahunIni = batchPerTahun[tahunSekarang]?.length > 0;
 
   content.innerHTML = `
     <p style="font-size:16px;font-weight:700;margin:0 0 14px" class="judul-serif">${ICONS.chart} Visualisasi</p>
@@ -1520,7 +1599,7 @@ async function renderVisualisasi() {
               .map(
                 (tahun) => `
               <optgroup label="${tahun}">
-                ${tahun !== "Tanpa periode" ? `<option value="tahun:${tahun}">— Tahun ${tahun} (akumulasi) —</option>` : ""}
+                ${tahun !== "Tanpa periode" ? `<option value="tahun:${tahun}" ${tahun === tahunSekarang && adaTahunIni ? "selected" : ""}>— Tahun ${tahun} (akumulasi) —</option>` : ""}
                 ${batchPerTahun[tahun].map((b) => `<option value="${b.id}">${b.label} · ${b.nama_bidang || "campuran"}</option>`).join("")}
               </optgroup>`
               )
@@ -1533,7 +1612,8 @@ async function renderVisualisasi() {
 
     <div class="grid-2" style="margin-bottom:14px;align-items:stretch">
       <div class="kartu" style="display:flex;flex-direction:column">
-        <p class="stat-label" style="font-weight:600;margin-bottom:12px">${ICONS.pie} Komposisi Keterangan <span id="labelDonut" style="font-weight:400;color:var(--teks-muted)"></span></p>
+        <p class="stat-label" style="font-weight:600;margin-bottom:10px">${ICONS.pie} Komposisi Keterangan <span id="labelDonut" style="font-weight:400;color:var(--teks-muted)"></span></p>
+        <div id="donutRingkasWfo"></div>
         <div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap;flex:1">
           <div id="donutChart"></div>
           <div id="donutLegend" style="flex:1;min-width:220px;max-width:100%;overflow:hidden"></div>
@@ -1549,7 +1629,7 @@ async function renderVisualisasi() {
         <div class="kartu">
           <p class="stat-label">${ICONS.users} Total Data Pegawai Terekap</p>
           <p class="stat-angka" id="statTotal">-</p>
-          <p style="font-size:11px;color:var(--teks-muted);margin:2px 0 0">≈ <span id="statPegawaiUnik">-</span> pegawai unik pada cakupan ini</p>
+          <p style="font-size:11px;color:var(--teks-muted);margin:2px 0 0">≈ <span id="statPegawaiUnik">-</span> pegawai pada cakupan ini</p>
         </div>
         <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:12px;flex:1">
           <div class="kartu kartu-klik" data-jenis="stat" data-field="terlambat" data-label="Telat">
@@ -1581,7 +1661,7 @@ async function renderVisualisasi() {
           <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2563EB;margin-right:3px"></span>Terlambat</span>
         </div>
         <div id="trenBulanan"></div>
-        <p style="font-size:10.5px;color:var(--teks-muted);margin:6px 0 0">Mengikuti filter Batch di atas.</p>
+        <p style="font-size:10.5px;color:var(--teks-muted);margin:6px 0 0"></p>
       </div>
 
       <div class="kartu">
@@ -1596,7 +1676,7 @@ async function renderVisualisasi() {
             <button type="button" class="toggle-urut-btn" data-jenisbar="alpha">Alpha</button>
           </div>
         </div>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Mengikuti filter Batch di atas · arahkan kursor ke batang untuk lihat nama</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px"></p>
         <div id="barKeterlambatan"></div>
       </div>
     </div>
@@ -1844,7 +1924,12 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
                 const selBulan = BULAN_URUT.slice(0, bulanLabel.length)
                   .map((b) => `<span style="${gayaSelBulan};${d[b] ? "font-weight:600;color:var(--teks-utama)" : "color:var(--teks-muted)"}">${d[b] || 0}</span>`)
                   .join("");
-                return `<div class="tabel-baris" style="grid-template-columns:${gridBulanan};${i % 2 ? "background:var(--abu-bg)" : ""}">
+                // FITUR BARU (19 Agu 2026): baris bisa diklik untuk langsung
+                // membuka rincian kehadiran pegawai itu di tab Cari Pegawai
+                // (modal ini otomatis tertutup dulu) - dulu nama di sini
+                // cuma teks statis, harus menutup modal & mencari manual
+                // lagi dari tab Cari Pegawai kalau mau lihat detailnya.
+                return `<div class="tabel-baris" style="grid-template-columns:${gridBulanan};${i % 2 ? "background:var(--abu-bg)" : ""}" title="Klik untuk lihat rincian kehadiran ${d.nama || "pegawai ini"}" onclick="bukaPegawaiDariRincian('${(d.nip || "").replace(/'/g, "\\'")}','${(d.nama || "").replace(/'/g, "\\'")}')">
                   <span>${d.nama || "-"}</span><span style="color:var(--teks-muted);font-size:11.5px">${d.nip || "-"}</span>
                   ${selBulan}
                   <span style="${gayaSelBulan};font-weight:700;color:var(--biru)">${d.total}</span>
@@ -1868,7 +1953,7 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
         <div style="max-height:52vh;overflow-y:auto">
           ${tampil
             .map(
-              (d, i) => `<div class="tabel-baris" style="grid-template-columns:${grid}">
+              (d, i) => `<div class="tabel-baris" style="grid-template-columns:${grid}" title="Klik untuk lihat rincian kehadiran ${d.nama || "pegawai ini"}" onclick="bukaPegawaiDariRincian('${(d.nip || "").replace(/'/g, "\\'")}','${(d.nama || "").replace(/'/g, "\\'")}')">
               <span>${i + 1}</span><span>${d.nama || "-"}</span><span>${d.nip || "-"}</span>
               ${adaLabelAsli ? `<span style="color:var(--teks-muted);font-style:italic">${d.label_asli || "-"}</span>` : ""}
               <span style="font-weight:600">${d.jumlah} hari</span>
@@ -2007,11 +2092,33 @@ function renderDonutKeterangan(data) {
       rincianLainnya.push([labelMentah, jumlah || 0]);
     }
   });
-  const entri = labelUtama.map((label) => [label, totalPerKategori[label]]);
+
+  // ROMBAK (20 Agu 2026): WFO dikeluarkan dari SEGMEN DONAT. WFO adalah
+  // hari kerja NORMAL - proporsinya selalu dominan (biasanya 90%+ dari
+  // seluruh hari tercatat), jadi kalau tetap ikut jadi satu segmen,
+  // kategori yang justru ingin dipantau (Sakit/Alpha/Cuti/Izin dst) jadi
+  // irisan super tipis yang nyaris tak kelihatan di grafiknya - padahal
+  // itu justru yang paling relevan untuk dibaca sekilas. Sekarang WFO
+  // ditampilkan terpisah sebagai ringkasan "Tingkat Kehadiran Normal", dan
+  // donatnya sendiri fokus ke KOMPOSISI hari-hari DI LUAR WFO saja -
+  // proporsi antar jenis ketidakhadiran jadi jauh lebih mudah dibaca.
+  const wfoJumlah = totalPerKategori["WFO"] || 0;
+  const labelNonWfo = labelUtama.filter((l) => l !== "WFO");
+  const entri = labelNonWfo.map((label) => [label, totalPerKategori[label]]);
   const jumlahLainnya = rincianLainnya.reduce((s, [, v]) => s + v, 0);
   if (jumlahLainnya > 0) entri.push(["Lainnya", jumlahLainnya]);
 
   const total = entri.reduce((s, [, v]) => s + v, 0);
+  const totalSemuaHari = wfoJumlah + total;
+  const persenWfo = totalSemuaHari > 0 ? ((wfoJumlah / totalSemuaHari) * 100).toFixed(1) : "0.0";
+
+  document.getElementById("donutRingkasWfo").innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--biru-muda-bg);border-radius:8px;margin-bottom:14px">
+      <span style="font-size:12.5px;color:var(--biru-tua);font-weight:600;display:flex;align-items:center;gap:6px">${ICONS.check} Tingkat Kehadiran Normal (WFO)</span>
+      <span style="font-size:15px;font-weight:700;color:var(--biru-tua)">${wfoJumlah} hari <span style="font-weight:400;font-size:11.5px;opacity:.75">(${persenWfo}% dari ${totalSemuaHari} hari)</span></span>
+    </div>
+  `;
+
   // PERBAIKAN (11 Agu 2026): diperbesar secukupnya (r 52->64, SVG
   // 130->160px) supaya kartu ini lebih mengisi tinggi yang sama dengan
   // grid 5 kartu statistik di sebelahnya - TIDAK dibuat sebesar mungkin,
@@ -2048,7 +2155,7 @@ function renderDonutKeterangan(data) {
       <svg width="160" height="160" viewBox="0 0 160 160" style="transform:rotate(-90deg)">${lingkaran}</svg>
       <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
         <span style="font-size:23px;font-weight:700;color:var(--teks-utama)">${total}</span>
-        <span style="font-size:11px;color:var(--teks-muted)">hari tercatat</span>
+        <span style="font-size:11px;color:var(--teks-muted);text-align:center;max-width:88px;line-height:1.25">hari di luar WFO</span>
       </div>
     </div>
   `;
@@ -2379,7 +2486,7 @@ async function renderAkunList() {
       <p style="font-size:16px;font-weight:700;margin:0" class="judul-serif">Akun</p>
       <button class="btn-primer" id="btnBukaFormAkun" onclick="toggleFormAkun()">+ Tambah Admin</button>
     </div>
-    <p style="font-size:12px;color:var(--teks-muted);margin:0 0 18px">Kelola akun admin yang bisa login ke sistem ini. Cuma Master Admin yang bisa menambah, menonaktifkan, atau menghapus akun - admin biasa tidak melihat halaman ini sama sekali.</p>
+    <p style="font-size:12px;color:var(--teks-muted);margin:0 0 18px">Kelola akun admin yang bisa login ke sistem ini. Hanya Master Admin yang bisa menambah, menonaktifkan, atau menghapus akun.</p>
 
     <div class="kartu" id="formTambahAkun" style="margin-bottom:16px;display:none">
       <p class="stat-label" style="font-weight:600;margin-bottom:10px">Buat Akun Admin Baru</p>
@@ -2457,7 +2564,12 @@ async function ubahStatusAkun(userId, aktifBaru) {
 }
 
 async function hapusAkun(userId) {
-  if (!confirm("Hapus akun ini? Pengguna yang bersangkutan tidak akan bisa login lagi, dan tindakan ini tidak bisa dibatalkan.")) return;
+  const lanjut = await konfirmasi("Hapus akun ini? Pengguna yang bersangkutan tidak akan bisa login lagi, dan tindakan ini tidak bisa dibatalkan.", {
+    judul: "Hapus akun ini?",
+    labelOk: "Ya, hapus akun",
+    bahaya: true,
+  });
+  if (!lanjut) return;
   const hasil = await api(`/api/akun/${userId}`, { method: "DELETE" });
   if (!hasil.ok) {
     alert(hasil.pesan || "Gagal menghapus akun.");
@@ -2502,7 +2614,7 @@ async function renderPengaturan() {
 
   content.innerHTML = `
     <p style="font-size:16px;font-weight:700;margin:0 0 4px" class="judul-serif">Pengaturan</p>
-    <p style="font-size:12px;color:var(--teks-muted);margin:0 0 18px">Data master di bawah ini dipakai sebagai pilihan dropdown di seluruh sistem (Proses Batch, Data Harian, Ringkasan Pegawai, Visualisasi) - ubah di sini, otomatis konsisten di mana-mana.</p>
+    <p style="font-size:12px;color:var(--teks-muted);margin:0 0 18px">Data master di bawah ini dipakai sebagai pilihan dropdown di seluruh sistem (Proses Batch, Data Harian, Ringkasan Pegawai, Visualisasi).</p>
 
     <p style="font-size:11.5px;font-weight:700;letter-spacing:.3px;color:var(--teks-muted);margin:0 0 8px;text-transform:uppercase">Tampilan</p>
     <div class="kartu" style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
@@ -2522,7 +2634,7 @@ async function renderPengaturan() {
     <div class="kartu" style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
       <div>
         <p class="stat-label" style="font-weight:600;margin-bottom:2px">Sinkronkan Ulang Ringkasan</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0;max-width:520px">Hitung ulang statistik Ringkasan Pegawai (Terlambat, Sakit, Izin, Alpha, dst) dari Data Harian saat ini, untuk SEMUA batch sekaligus. Pakai ini kalau ada selisih angka antara donat Visualisasi dan kartu statistik di sebelahnya.</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0;max-width:520px">Hitung ulang statistik Ringkasan Pegawai (Terlambat, Sakit, Izin, Alpha, dst) dari Data Harian saat ini, untuk semua batch. Gunakan jika ada selisih angka antara Visualisasi dan kartu statistik.</p>
       </div>
       <button type="button" class="btn-sekunder" id="btnSinkronRingkasan" onclick="sinkronkanRingkasan()">${ICONS.download || "⟳"} Sinkronkan Sekarang</button>
     </div>
@@ -2534,7 +2646,7 @@ async function renderPengaturan() {
         <div class="panel-master-header" onclick="toggleMasterPanel('Keterangan')" role="button" tabindex="0" aria-expanded="${panelKeteranganTerbuka}" aria-controls="panelKeterangan" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleMasterPanel('Keterangan');}">
           <div>
             <p class="stat-label" style="font-weight:600;margin-bottom:2px">Daftar Keterangan</p>
-            <p style="font-size:11px;color:var(--teks-muted);margin:0">${keterangan.length} pilihan — dropdown "Keterangan" di tabel Data Harian</p>
+            <p style="font-size:11px;color:var(--teks-muted);margin:0">${keterangan.length} pilihan dropdown "Keterangan" di tabel Data Harian</p>
           </div>
           <svg id="panahKeterangan" class="ikon panel-master-panah ${panelKeteranganTerbuka ? "terbuka" : ""}" viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
@@ -2560,7 +2672,7 @@ async function renderPengaturan() {
         <div class="panel-master-header" onclick="toggleMasterPanel('Bidang')" role="button" tabindex="0" aria-expanded="${panelBidangTerbuka}" aria-controls="panelBidang" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleMasterPanel('Bidang');}">
           <div>
             <p class="stat-label" style="font-weight:600;margin-bottom:2px">Daftar Bidang</p>
-            <p style="font-size:11px;color:var(--teks-muted);margin:0">${bidang.length} pilihan — Ringkasan Pegawai &amp; filter Visualisasi</p>
+            <p style="font-size:11px;color:var(--teks-muted);margin:0">${bidang.length} pilihan Ringkasan Pegawai &amp; filter Visualisasi</p>
           </div>
           <svg id="panahBidang" class="ikon panel-master-panah ${panelBidangTerbuka ? "terbuka" : ""}" viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
@@ -2608,7 +2720,8 @@ async function tambahKeterangan() {
 }
 
 async function hapusKeterangan(id) {
-  if (!confirm("Hapus keterangan ini dari daftar dropdown?")) return;
+  const lanjut = await konfirmasi("Hapus keterangan ini dari daftar dropdown?", { judul: "Hapus keterangan?", labelOk: "Ya, hapus", bahaya: true });
+  if (!lanjut) return;
   await api(`/api/keterangan/${id}`, { method: "DELETE" });
   daftarKeteranganCache = null;
   renderPengaturan();
@@ -2624,7 +2737,11 @@ async function tambahBidang() {
 }
 
 async function hapusBidang(id) {
-  if (!confirm("Hapus bidang ini dari daftar? Pegawai yang sudah ditandai bidang ini di batch lama tidak akan ikut terhapus, cuma tidak muncul lagi sebagai pilihan baru.")) return;
+  const lanjut = await konfirmasi(
+    "Hapus bidang ini dari daftar? Pegawai yang sudah ditandai bidang ini di batch lama tidak akan ikut terhapus, cuma tidak muncul lagi sebagai pilihan baru.",
+    { judul: "Hapus bidang?", labelOk: "Ya, hapus", bahaya: true }
+  );
+  if (!lanjut) return;
   await api(`/api/bidang/${id}`, { method: "DELETE" });
   daftarBidangCache = null;
   renderPengaturan();

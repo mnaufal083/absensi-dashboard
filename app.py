@@ -112,7 +112,7 @@ def _kop_laporan_resmi(ws, jumlah_kolom, subjudul, konteks_periode):
     huruf_akhir = get_column_letter(jumlah_kolom)
 
     ws.merge_cells(f"A1:{huruf_akhir}1")
-    ws["A1"] = "KEJAKSAAN TINGGI JAWA TENGAH — BIDANG DASKRIMTI"
+    ws["A1"] = "KEJAKSAAN TINGGI JAWA TENGAH (BIDANG DASKRIMTI)"
     ws["A1"].font = Font(bold=True, size=13, color=_WARNA_KOP)
     ws["A1"].alignment = Alignment(horizontal="center")
 

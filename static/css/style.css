@@ -118,6 +118,12 @@ button {
 .btn-primer:hover { background: var(--biru-hover); }
 .btn-sekunder { background: var(--kartu-bg); color: var(--biru); border: 1px solid var(--biru-muda-tepi); }
 .btn-sekunder:hover { background: var(--biru-muda-bg); }
+/* ROMBAK (20 Agu 2026): tombol untuk aksi destruktif di modal konfirmasi
+   kustom (lihat dashboard.js::konfirmasi) - dipakai untuk hapus batch,
+   hapus akun, dsb. Warna solid merah supaya jelas beda dari btn-primer
+   biru (aksi normal), sekaligus menegaskan "tindakan ini serius". */
+.btn-bahaya { background: #DC2626; color: #fff; border: none; }
+.btn-bahaya:hover { background: #B91C1C; }
 /* FITUR BARU (11 Agu 2026): dipakai tombol "Unduh Excel" selagi batch
    masih Draf - abu-abu redup dulu (belum "siap unduh"), baru berubah jadi
    .btn-primer (biru) begitu status batch Final. Tetap bisa diklik (bukan
