@@ -1938,7 +1938,7 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
               .join("")}
           </div>
         </div>
-        <p style="font-size:11px;color:var(--teks-muted);margin:8px 0 0">${tampil.length} pegawai ditampilkan · tahun ${tahunSaatIni} · kolom bulan otomatis terisi mengikuti batch yang sudah diproses.</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:8px 0 0">${tampil.length} pegawai ditampilkan · tahun ${tahunSaatIni}</p>
       `;
       return;
     }
