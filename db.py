@@ -679,14 +679,21 @@ def statistik_ringkas(mode="all", value=None):
 
 
 def agregasi_keterangan(mode="all", value=None):
-    """Hitung jumlah baris harian per jenis Keterangan (Hadir/Sakit/Izin/dst),
-    sesuai cakupan filter. Dipakai untuk donut chart."""
+    """Hitung jumlah baris harian per jenis Keterangan (Sakit/Izin/dst),
+    sesuai cakupan filter. Dipakai untuk donut chart.
+
+    PERBAIKAN (13 Agu 2026): "Libur" SENGAJA dikecualikan total dari sini
+    (bukan cuma disembunyikan di legenda) - permintaan pengguna: hari libur
+    sudah pasti bukan hari kerja, jadi tidak perlu ikut porsi apa pun di
+    donut, termasuk tidak ikut menambah total "hari tercatat"."""
     q = supabase.table("attendance_records").select("keterangan")
     q = _terapkan_filter(q, mode, value)
     rows = _ambil_semua(q)
     hasil = {}
     for r in rows:
         k = r.get("keterangan") or "Tidak diketahui"
+        if k.strip().lower() == "libur":
+            continue
         hasil[k] = hasil.get(k, 0) + 1
     return hasil
 
@@ -815,6 +822,80 @@ def ranking_lainnya(mode="all", value=None, kategori_dikenal=None):
             total[kunci] = {"nama": r.get("nama") or "-", "nip": r.get("nip"), "label_asli": label_asli, "jumlah": 0}
         total[kunci]["jumlah"] += 1
     return sorted(total.values(), key=lambda x: x["jumlah"], reverse=True)
+
+
+BULAN_URUT = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]
+BULAN_LABEL = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+
+
+def _bulan_dari_tanggal(tanggal):
+    """Ambil 2 digit bulan ('01'..'12') dari kolom tanggal, robust terhadap
+    2 kemungkinan format yang pernah dipakai extractor.py (ISO 'YYYY-MM-DD'
+    atau 'DD/MM/YYYY') - supaya tidak salah baca kalau ada batch lama/baru
+    yang formatnya beda."""
+    t = (tanggal or "").strip()
+    if not t:
+        return None
+    if "-" in t:
+        bagian = t.split("-")
+        if len(bagian[0]) == 4 and len(bagian) >= 2:  # YYYY-MM-DD
+            return bagian[1].zfill(2)
+    if "/" in t:
+        bagian = t.split("/")
+        if len(bagian) >= 2:  # DD/MM/YYYY
+            return bagian[1].zfill(2)
+    return None
+
+
+def rincian_bulanan(jenis, kunci, tahun):
+    """FITUR BARU (13 Agu 2026): rincian per pegawai untuk SATU kategori,
+    dipecah PER BULAN sepanjang satu tahun (Jan..Des) + kolom Total di
+    kanan - dipakai versi "tabel bulanan" panel rincian kategori. Kolom
+    bulan yang belum ada batch-nya otomatis tetap 0 (bukan kosong/null),
+    dan makin lengkap terisi begitu makin banyak batch bulan itu diproses.
+
+    jenis: 'keterangan' (kunci=label Keterangan mis. "Alpha") atau
+    'stat' (kunci='terlambat' - field lain seperti sakit/izin/alpha
+    sebenarnya sama saja dengan jenis='keterangan', jadi cukup diarahkan
+    ke situ oleh pemanggil di app.py)."""
+    ids = _batch_ids_untuk_tahun(tahun)
+    if not ids:
+        return []
+    rows = _ambil_semua(
+        supabase.table("attendance_records")
+        .select("nip,nama,tanggal,keterangan,datang_telat")
+        .in_("batch_id", ids)
+    )
+
+    if jenis == "stat" and kunci == "terlambat":
+        def cocok(r):
+            return (r.get("datang_telat") or "-").strip() not in ("", "-")
+    else:
+        label_kecil = kunci.strip().lower()
+
+        def cocok(r):
+            return (r.get("keterangan") or "").strip().lower() == label_kecil
+
+    data = {}
+    for r in rows:
+        if not cocok(r):
+            continue
+        bulan = _bulan_dari_tanggal(r.get("tanggal"))
+        if bulan not in BULAN_URUT:
+            continue
+        nip_kunci = r.get("nip") or r.get("nama")
+        if nip_kunci not in data:
+            data[nip_kunci] = {"nama": r.get("nama") or "-", "nip": r.get("nip"), **{b: 0 for b in BULAN_URUT}}
+        data[nip_kunci][bulan] += 1
+
+    hasil = []
+    for d in data.values():
+        total = sum(d[b] for b in BULAN_URUT)
+        if total == 0:
+            continue
+        hasil.append({**d, "total": total})
+    hasil.sort(key=lambda x: -x["total"])
+    return hasil
 
 
 def ranking_keterangan_harian(label, mode="all", value=None, limit=None):
@@ -986,3 +1067,28 @@ def tambah_keterangan(label):
 
 def hapus_keterangan(keterangan_id):
     supabase.table("keterangan_master").delete().eq("id", keterangan_id).execute()
+
+
+def sinkronkan_semua_ringkasan():
+    """FITUR BARU (13 Agu 2026): jalankan _rekalkulasi_ringkasan_dari_harian
+    untuk SEMUA pasangan (batch, pegawai) sekaligus - bukan cuma yang
+    pernah diedit. Menyamakan angka statistik ringkasan_pegawai (Alpha,
+    Sakit, Izin, Terlambat, dst) supaya PERSIS sama dengan hasil hitung
+    literal dari attendance_records (sumber yang sama dipakai donut chart
+    Visualisasi) - menghapus selisih yang bisa muncul untuk data yang
+    masih memakai angka asli hasil ekstraksi PDF pertama kali (yang
+    kadang beda 1-2 hari dari hitungan literal per-baris).
+
+    Aman dijalankan berkali-kali (idempotent) - dipakai baik lewat
+    endpoint (tombol di halaman Pengaturan) maupun skrip mandiri
+    sinkronkan_ringkasan.py untuk sekali jalan langsung dari terminal.
+
+    Return jumlah baris ringkasan_pegawai yang berhasil disinkronkan."""
+    pasangan = _ambil_semua(supabase.table("attendance_records").select("batch_id,nip"))
+    unik = {(p["batch_id"], p["nip"]) for p in pasangan if p.get("nip") and p.get("nip") != "-"}
+    jumlah_berhasil = 0
+    for batch_id, nip in unik:
+        hasil = _rekalkulasi_ringkasan_dari_harian(batch_id, nip)
+        if hasil is not None:
+            jumlah_berhasil += 1
+    return jumlah_berhasil

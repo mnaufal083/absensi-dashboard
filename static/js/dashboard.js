@@ -51,6 +51,7 @@ let panelBidangTerbuka = false;
 let pendingChanges = {}; // key: `${record_table}:${record_id}:${field}` -> {record_table, record_id, field, nilai_baru}
 let currentBatchId = null;
 let filterVisualisasiSaatIni = { mode: "all", value: "", label: "Seluruh Batch (akumulasi total)" };
+let rankingSaatIni = { terlambat: [], alpha: [] }; // dipakai toggle Keterlambatan/Alpha di grafik batang
 const currentUserId = document.body.dataset.userId || null;
 
 // ---------------------------------------------------------------------
@@ -283,18 +284,29 @@ function optionsKeterangan(list, terpilih) {
 // ---------------------------------------------------------------------
 // BERANDA
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// BERANDA — ROMBAK TOTAL (19 Agu 2026)
+// ---------------------------------------------------------------------
+// Konsep lama: 3 kartu angka statis (tidak bisa diklik), kartu teks
+// "Tentang Bidang Daskrimti" yang isinya tidak pernah berubah (padahal
+// info yang sama sudah ada permanen di header sidebar), dan "Perlu
+// ditinjau" cuma berupa ANGKA tanpa cara langsung membuka batch mana
+// yang dimaksud.
+//
+// Konsep baru: Beranda jadi ringkasan yang lebih "operasional" -
+// 4 kartu statistik (2 di antaranya bisa diklik langsung ke tindakan),
+// grafik tren bulanan kecil, DAFTAR NYATA batch yang masih Draft (bukan
+// cuma angka) supaya bisa langsung dibuka dari sini, dan baris ranking
+// yang sekarang bisa diklik untuk lompat ke riwayat pegawai terkait.
+// Kartu teks statis "Tentang Bidang" dihapus karena sudah redundan
+// dengan header yang selalu tampil di sidebar.
 async function renderBeranda() {
   const tahunSekarang = String(new Date().getFullYear());
   const [data, batches] = await Promise.all([
     api(`/api/ringkasan-beranda?filter_mode=tahun&filter_value=${tahunSekarang}`),
     api("/api/batches"),
   ]);
-  const aktivitas = renderPotonganAktivitas(data.aktivitas_terbaru);
 
-  // FITUR BARU (1 Agu 2026): dropdown periode dikelompokkan per tahun -
-  // sama seperti di Visualisasi - supaya "Pegawai terekap" & kedua ranking
-  // di bawah bisa dilihat per tahun tertentu, atau per batch/periode
-  // (biasanya ~1 bulan) tertentu, bukan cuma terpaku ke tahun berjalan.
   const batchPerTahun = {};
   batches.forEach((b) => {
     const tahun = (b.periode_akhir || b.dibuat_pada || "").slice(0, 4) || "Tanpa periode";
@@ -315,62 +327,88 @@ async function renderBeranda() {
       .join("")}
   `;
 
+  // Naik/turun Alpha bulan terakhir dibanding bulan sebelumnya, dihitung
+  // dari data tren yang sama dengan grafik garis di tab Visualisasi -
+  // supaya kartu "Alpha Bulan Ini" bukan cuma angka mati, tapi juga
+  // memberi konteks arah tren tanpa perlu buka tab Visualisasi dulu.
+  const trenAwal = data.tren || [];
+  const { angka: alphaBulanIni, deltaHtml } = hitungDeltaAlpha(trenAwal);
+
   content.innerHTML = `
-    <p style="font-size:17px;font-weight:700;margin:0 0 4px" class="judul-serif">Selamat datang</p>
-    <p style="font-size:12.5px;color:var(--teks-sekunder);margin:0 0 18px">Ringkasan aktivitas rekapitulasi absensi</p>
-
-    <div class="grid-3" style="margin-bottom:18px">
-      <div class="kartu"><p class="stat-label">Total batch</p><p class="stat-angka">${data.total_batch}</p><p style="font-size:10.5px;color:var(--teks-muted);margin:2px 0 0">seluruh waktu</p></div>
-      <div class="kartu"><p class="stat-label">Perlu ditinjau</p><p class="stat-angka" style="color:var(--merah-teks)">${data.perlu_ditinjau}</p><p style="font-size:10.5px;color:var(--teks-muted);margin:2px 0 0">seluruh waktu</p></div>
-      <div class="kartu"><p class="stat-label">Pegawai terekap</p><p class="stat-angka" id="berandaTotalPegawai">${data.total_pegawai}</p><p style="font-size:10.5px;color:var(--teks-muted);margin:2px 0 0" id="berandaLabelPeriode">tahun ${tahunSekarang}</p></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+      <div>
+        <p style="font-size:17px;font-weight:700;margin:0 0 4px" class="judul-serif">Selamat datang</p>
+        <p style="font-size:12.5px;color:var(--teks-sekunder);margin:0">Ringkasan operasional per ${new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" })}</p>
+      </div>
+      <button class="btn-primer" onclick="gotoTab('proses')">+ Proses batch baru</button>
     </div>
 
-    <div class="kartu">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <span class="icon-langkah">01</span>
-        <p style="font-size:14px;font-weight:700;margin:0" class="judul-serif">Tentang Bidang Daskrimti</p>
+    <div class="grid-4" style="margin-bottom:14px">
+      <div class="kartu kartu-klik" onclick="gotoTab('riwayat')">
+        <p class="stat-label">Total Batch</p>
+        <p class="stat-angka">${data.total_batch}</p>
+        <p class="stat-klik-hint">lihat semua →</p>
       </div>
-      <p style="font-size:13px;color:var(--teks-sekunder);line-height:1.7;margin:0">
-        Bidang yang menangani data dan statistik kriminal serta dukungan teknologi informasi
-        di lingkungan Kejaksaan Tinggi Jawa Tengah. Sistem ini menyederhanakan rekapitulasi
-        kehadiran pegawai yang sebelumnya dikerjakan manual dari berkas PDF satu per satu.
-      </p>
+      <div class="kartu kartu-klik" onclick="document.getElementById('bagianBatchDraft').scrollIntoView({behavior:'smooth',block:'start'})">
+        <p class="stat-label">Perlu Ditinjau</p>
+        <p class="stat-angka" style="color:${data.perlu_ditinjau ? "var(--merah-teks)" : "var(--hijau-status-teks)"}">${data.perlu_ditinjau}</p>
+        <p class="stat-klik-hint">${data.perlu_ditinjau ? "lihat daftar ↓" : "semua sudah final"}</p>
+      </div>
+      <div class="kartu">
+        <p class="stat-label">Pegawai Unik</p>
+        <p class="stat-angka" id="berandaPegawaiUnik">${data.pegawai_unik}</p>
+        <p style="font-size:10.5px;color:var(--teks-muted);margin:2px 0 0" id="berandaLabelUnik">tahun ${tahunSekarang}</p>
+      </div>
+      <div class="kartu">
+        <p class="stat-label">Alpha Bulan Terakhir</p>
+        <p class="stat-angka" id="berandaAlphaBulanIni" style="color:var(--merah-teks)">${alphaBulanIni}</p>
+        <p style="font-size:10.5px;margin:2px 0 0" id="berandaDeltaAlpha">${deltaHtml}</p>
+      </div>
     </div>
 
-    <div class="kartu">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-        <span class="icon-langkah">02</span>
-        <p style="font-size:14px;font-weight:700;margin:0" class="judul-serif">Aktivitas terbaru</p>
+    <div class="grid-2" style="margin-bottom:14px;align-items:stretch">
+      <div class="kartu">
+        <p style="font-size:13.5px;font-weight:700;margin:0 0 10px" class="judul-serif">Tren Bulanan</p>
+        <div id="berandaTren"></div>
       </div>
-      ${aktivitas}
+      <div class="kartu" id="bagianBatchDraft">
+        <p style="font-size:13.5px;font-weight:700;margin:0 0 10px" class="judul-serif">Batch Perlu Ditinjau</p>
+        <div id="berandaDaftarDraft"></div>
+      </div>
     </div>
 
     <div class="kartu" style="margin-bottom:14px">
-      <label style="font-size:11.5px;color:var(--teks-sekunder);font-weight:600;display:block;margin-bottom:5px">Periode untuk "Pegawai Terekap" &amp; rekapitulasi di bawah</label>
+      <label style="font-size:11.5px;color:var(--teks-sekunder);font-weight:600;display:block;margin-bottom:5px">Periode untuk statistik &amp; rekapitulasi di bawah</label>
       <select id="berandaFilterPeriode" style="max-width:340px">${opsiPeriode}</select>
     </div>
 
-    <div class="grid-2">
+    <div class="grid-2" style="margin-bottom:14px">
       <div class="kartu">
         <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Ketidakhadiran Tanpa Keterangan (Alpha)</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px" id="berandaLabelAlpha">Dijumlah dari tahun ${tahunSekarang}</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px" id="berandaLabelAlpha">Dijumlah dari tahun ${tahunSekarang} · klik nama untuk lihat riwayat</p>
         <div class="scroll-list" id="rekapAlphaBeranda"></div>
       </div>
       <div class="kartu">
         <p class="stat-label" style="font-weight:600;margin-bottom:2px">Rekapitulasi Keterlambatan Masuk Kerja</p>
-        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px" id="berandaLabelTerlambat">Dijumlah dari tahun ${tahunSekarang}</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px" id="berandaLabelTerlambat">Dijumlah dari tahun ${tahunSekarang} · klik nama untuk lihat riwayat</p>
         <div class="scroll-list" id="rekapTerlambatBeranda"></div>
       </div>
     </div>
 
-    <div style="display:flex;gap:10px;margin-top:6px">
-      <button class="btn-primer" onclick="gotoTab('proses')">Proses batch baru ↗</button>
-      <button class="btn-sekunder" onclick="gotoTab('riwayat')">Lihat riwayat batch</button>
+    <div class="kartu">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <p style="font-size:13.5px;font-weight:700;margin:0" class="judul-serif">Aktivitas Terbaru</p>
+        <button type="button" class="btn-sekunder" style="padding:5px 12px;font-size:11.5px" onclick="gotoTab('log')">Lihat semua log →</button>
+      </div>
+      <div id="berandaAktivitas"></div>
     </div>
   `;
 
-  renderTabelRekap("rekapAlphaBeranda", data.ranking_alpha || []);
-  renderTabelRekap("rekapTerlambatBeranda", data.ranking_terlambat || []);
+  renderTrenBulananGaris("berandaTren", trenAwal);
+  renderDaftarBatchDraft(data.batch_draft || []);
+  renderTabelRekapKlik("rekapAlphaBeranda", data.ranking_alpha || []);
+  renderTabelRekapKlik("rekapTerlambatBeranda", data.ranking_terlambat || []);
+  document.getElementById("berandaAktivitas").innerHTML = renderPotonganAktivitas((data.aktivitas_terbaru || []).slice(0, 5));
 
   document.getElementById("berandaFilterPeriode").addEventListener("change", async (e) => {
     const nilai = e.target.value;
@@ -387,13 +425,88 @@ async function renderBeranda() {
     const label = nilai === "all" ? "seluruh data" : labelTerpilih;
 
     const ulang = await api(`/api/ringkasan-beranda?filter_mode=${mode}&filter_value=${encodeURIComponent(value)}`);
-    document.getElementById("berandaTotalPegawai").textContent = ulang.total_pegawai;
-    document.getElementById("berandaLabelPeriode").textContent = label;
-    document.getElementById("berandaLabelAlpha").textContent = `Dijumlah dari ${label}`;
-    document.getElementById("berandaLabelTerlambat").textContent = `Dijumlah dari ${label}`;
-    renderTabelRekap("rekapAlphaBeranda", ulang.ranking_alpha || []);
-    renderTabelRekap("rekapTerlambatBeranda", ulang.ranking_terlambat || []);
+    document.getElementById("berandaPegawaiUnik").textContent = ulang.pegawai_unik;
+    document.getElementById("berandaLabelUnik").textContent = label;
+    document.getElementById("berandaLabelAlpha").textContent = `Dijumlah dari ${label} · klik nama untuk lihat riwayat`;
+    document.getElementById("berandaLabelTerlambat").textContent = `Dijumlah dari ${label} · klik nama untuk lihat riwayat`;
+    renderTabelRekapKlik("rekapAlphaBeranda", ulang.ranking_alpha || []);
+    renderTabelRekapKlik("rekapTerlambatBeranda", ulang.ranking_terlambat || []);
+    renderTrenBulananGaris("berandaTren", ulang.tren || []);
+    const { angka, deltaHtml: deltaBaru } = hitungDeltaAlpha(ulang.tren || []);
+    document.getElementById("berandaAlphaBulanIni").textContent = angka;
+    document.getElementById("berandaDeltaAlpha").innerHTML = deltaBaru;
   });
+}
+
+// Ambil 2 bulan TERAKHIR dari data tren (array sudah terurut naik
+// berdasarkan bulan) dan bandingkan Alpha-nya - dipakai kartu "Alpha
+// Bulan Terakhir" di Beranda supaya ada konteks arah tren (naik = lebih
+// buruk = merah, turun/sama = lebih baik = hijau), bukan cuma angka mati.
+function hitungDeltaAlpha(tren) {
+  if (!tren.length) return { angka: 0, deltaHtml: `<span style="color:var(--teks-muted)">belum ada data</span>` };
+  const terakhir = tren[tren.length - 1];
+  if (tren.length < 2) {
+    return { angka: terakhir.alpha, deltaHtml: `<span style="color:var(--teks-muted)">${labelBulan(terakhir.bulan)}</span>` };
+  }
+  const sebelumnya = tren[tren.length - 2];
+  const delta = terakhir.alpha - sebelumnya.alpha;
+  const warna = delta > 0 ? "var(--merah-teks)" : delta < 0 ? "var(--hijau-status-teks)" : "var(--teks-muted)";
+  const panah = delta > 0 ? "▲" : delta < 0 ? "▼" : "▬";
+  const teks = delta === 0 ? "sama dengan bulan lalu" : `${Math.abs(delta)} dari bulan lalu`;
+  return { angka: terakhir.alpha, deltaHtml: `<span style="color:${warna};font-weight:600">${panah} ${teks}</span>` };
+}
+
+// Daftar NYATA batch berstatus Draft (bukan cuma angka) - tiap baris bisa
+// langsung diklik untuk membuka batch itu di tab Riwayat, jadi "Perlu
+// ditinjau" di Beranda benar-benar jadi pintasan tindakan, bukan cuma
+// informasi pasif yang mengharuskan pindah tab dan mencari sendiri.
+function renderDaftarBatchDraft(daftar) {
+  const wrap = document.getElementById("berandaDaftarDraft");
+  if (!daftar.length) {
+    wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Semua batch sudah berstatus Final. Tidak ada yang perlu ditinjau saat ini.</p>`;
+    return;
+  }
+  wrap.innerHTML = `<div class="scroll-list">${daftar
+    .map(
+      (b) => `<div class="tabel-baris" style="grid-template-columns:1fr auto;cursor:pointer" onclick="gotoTab('riwayat');setTimeout(()=>bukaDetailBatch('${b.id}'),30)">
+        <span>${b.label} <span style="color:var(--teks-muted)">· ${b.jumlah_pegawai} pegawai</span></span>
+        <span style="color:var(--kuning-status-teks);font-weight:600">Buka →</span>
+      </div>`
+    )
+    .join("")}</div>`;
+}
+
+// Sama seperti renderTabelRekap, tapi tiap baris bisa DIKLIK untuk lompat
+// ke tab "Cari Pegawai" dan langsung membuka riwayat pegawai itu - dipakai
+// khusus di Beranda supaya ranking Alpha/Terlambat jadi actionable, bukan
+// cuma daftar untuk dibaca.
+function renderTabelRekapKlik(elId, data) {
+  const wrap = document.getElementById(elId);
+  if (!data.length) {
+    wrap.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic;padding:10px 14px">Tidak ada catatan pada periode ini.</p>`;
+    return;
+  }
+  wrap.innerHTML = data
+    .map(
+      (d, i) => `<div class="baris-rekap" style="cursor:pointer" onclick="bukaPegawaiDariBeranda('${d.nip || ""}','${(d.nama || "").replace(/'/g, "\\'")}')">
+      <span><span style="color:var(--teks-muted);margin-right:6px">${i + 1}.</span>${d.nama}</span>
+      <span style="font-weight:600">${d.jumlah} hari</span>
+    </div>`
+    )
+    .join("");
+}
+
+// Lompat ke tab "Cari Pegawai", isikan kotak pencarian dengan NIP/nama
+// pegawai yang diklik dari ranking Beranda, dan langsung tampilkan
+// riwayatnya - renderCariPegawai() bersifat sinkron jadi kotak pencarian
+// sudah pasti ada di DOM begitu gotoTab() selesai dipanggil.
+function bukaPegawaiDariBeranda(nip, nama) {
+  gotoTab("cari");
+  const input = document.getElementById("inputCari");
+  if (input) {
+    input.value = nip || nama;
+    input.dispatchEvent(new Event("input"));
+  }
 }
 
 function renderPotonganAktivitas(daftar) {
@@ -1355,9 +1468,12 @@ async function togglePegawai(kartu) {
 // Harian) - selalu 10 baris dengan urutan & warna yang konsisten, termasuk
 // yang 0 kejadian, supaya gampang dibandingkan antar batch. Opsi "-"
 // (placeholder teknis) sengaja tidak ikut ditampilkan di sini.
+// PERBAIKAN (13 Agu 2026): "Libur" dihapus dari daftar - permintaan
+// pengguna, hari libur sudah pasti bukan hari kerja, jadi tidak perlu
+// ikut porsi apa pun di donut (backend agregasi_keterangan juga sudah
+// mengecualikannya total, bukan cuma disembunyikan di sini).
 const WARNA_KETERANGAN = {
   "WFO": "#2563EB",
-  "Libur": "#94A3B8",
   "Izin": "#EAB308",
   "Dinas Luar": "#0D9488",
   "Alpha": "#DC2626",
@@ -1423,27 +1539,35 @@ async function renderVisualisasi() {
           <div id="donutLegend" style="flex:1;min-width:220px;max-width:100%;overflow:hidden"></div>
         </div>
       </div>
-      <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:12px">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <!-- PERBAIKAN (13 Agu 2026): dulu "Total Data Pegawai Terekap"
+             ikut jadi salah satu dari 5 kartu di grid 2 kolom, menyisakan
+             1 slot kosong menggantung di baris terakhir (5 kartu ganjil
+             di grid genap). Sekarang jadi kartu lebar tersendiri di atas,
+             dan Telat/Sakit/Izin/Alpha jadi grid 2x2 yang penuh & rapi
+             tanpa slot kosong. -->
         <div class="kartu">
           <p class="stat-label">${ICONS.users} Total Data Pegawai Terekap</p>
           <p class="stat-angka" id="statTotal">-</p>
           <p style="font-size:11px;color:var(--teks-muted);margin:2px 0 0">≈ <span id="statPegawaiUnik">-</span> pegawai unik pada cakupan ini</p>
         </div>
-        <div class="kartu kartu-klik" data-jenis="stat" data-field="terlambat" data-label="Telat">
-          <p class="stat-label">${ICONS.clock} Telat (hari)</p><p class="stat-angka" style="color:#2563EB" id="statTelat">-</p>
-          <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
-        </div>
-        <div class="kartu kartu-klik" data-jenis="stat" data-field="sakit" data-label="Sakit">
-          <p class="stat-label">Sakit (hari)</p><p class="stat-angka" style="color:#D97706" id="statSakit">-</p>
-          <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
-        </div>
-        <div class="kartu kartu-klik" data-jenis="stat" data-field="izin" data-label="Izin">
-          <p class="stat-label">Izin (hari)</p><p class="stat-angka" style="color:#EAB308" id="statIzin">-</p>
-          <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
-        </div>
-        <div class="kartu kartu-klik" data-jenis="stat" data-field="alpha" data-label="Alpha">
-          <p class="stat-label">${ICONS.x} Alpha (hari)</p><p class="stat-angka" style="color:var(--merah-teks)" id="statAlpha">-</p>
-          <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
+        <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:12px;flex:1">
+          <div class="kartu kartu-klik" data-jenis="stat" data-field="terlambat" data-label="Telat">
+            <p class="stat-label">${ICONS.clock} Telat (hari)</p><p class="stat-angka" style="color:#2563EB" id="statTelat">-</p>
+            <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
+          </div>
+          <div class="kartu kartu-klik" data-jenis="stat" data-field="sakit" data-label="Sakit">
+            <p class="stat-label">Sakit (hari)</p><p class="stat-angka" style="color:#D97706" id="statSakit">-</p>
+            <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
+          </div>
+          <div class="kartu kartu-klik" data-jenis="stat" data-field="izin" data-label="Izin">
+            <p class="stat-label">Izin (hari)</p><p class="stat-angka" style="color:#EAB308" id="statIzin">-</p>
+            <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
+          </div>
+          <div class="kartu kartu-klik" data-jenis="stat" data-field="alpha" data-label="Alpha">
+            <p class="stat-label">${ICONS.x} Alpha (hari)</p><p class="stat-angka" style="color:var(--merah-teks)" id="statAlpha">-</p>
+            <p class="stat-klik-hint">klik untuk lihat per pegawai</p>
+          </div>
         </div>
       </div>
     </div>
@@ -1461,12 +1585,31 @@ async function renderVisualisasi() {
       </div>
 
       <div class="kartu">
-        <p class="stat-label" style="font-weight:600;margin-bottom:2px">${ICONS.clock} Rekapitulasi Keterlambatan Masuk Kerja <span id="labelBar" style="font-weight:400;color:var(--teks-muted)"></span></p>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:2px">
+          <p class="stat-label" style="font-weight:600;margin:0">${ICONS.clock} Rekapitulasi <span id="labelBarJenis">Keterlambatan Masuk Kerja</span> <span id="labelBar" style="font-weight:400;color:var(--teks-muted)"></span></p>
+          <!-- FITUR BARU (13 Agu 2026): dulu grafik batang ini cuma bisa
+               Keterlambatan - sekarang bisa ganti ke Alpha juga lewat 2
+               tombol kecil ini, tanpa perlu fetch ulang (data ranking_
+               alpha sudah ikut terkirim di /api/visualisasi sekalian). -->
+          <div class="toggle-urut">
+            <button type="button" class="toggle-urut-btn active" data-jenisbar="terlambat">Keterlambatan</button>
+            <button type="button" class="toggle-urut-btn" data-jenisbar="alpha">Alpha</button>
+          </div>
+        </div>
         <p style="font-size:11px;color:var(--teks-muted);margin:0 0 10px">Mengikuti filter Batch di atas · arahkan kursor ke batang untuk lihat nama</p>
         <div id="barKeterlambatan"></div>
       </div>
     </div>
   `;
+
+  document.querySelectorAll('[data-jenisbar]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll('[data-jenisbar]').forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("labelBarJenis").textContent = btn.dataset.jenisbar === "alpha" ? "Alpha" : "Keterlambatan Masuk Kerja";
+      renderBarKeterlambatan(btn.dataset.jenisbar === "alpha" ? rankingSaatIni.alpha : rankingSaatIni.terlambat);
+    });
+  });
 
   document.getElementById("filterBatch").addEventListener("change", muatDataVisualisasi);
   // FITUR BARU (11 Agu 2026): klik kartu Telat/Sakit/Izin/Alpha membuka
@@ -1515,7 +1658,12 @@ async function muatDataVisualisasi() {
 
   renderDonutKeterangan(viz.keterangan);
   renderTrenBulananGaris("trenBulanan", viz.tren);
-  renderBarKeterlambatan(viz.ranking_terlambat);
+  rankingSaatIni = { terlambat: viz.ranking_terlambat, alpha: viz.ranking_alpha };
+  // Tetap tampilkan sesuai tab yang sedang aktif (mis. kalau tadi user
+  // sudah pindah ke tab "Alpha" lalu ganti Batch/Periode, jangan diam-diam
+  // balik ke Keterlambatan).
+  const jenisBarAktif = document.querySelector('[data-jenisbar].active')?.dataset.jenisbar || "terlambat";
+  renderBarKeterlambatan(jenisBarAktif === "alpha" ? rankingSaatIni.alpha : rankingSaatIni.terlambat);
 }
 
 // -----------------------------------------------------------------------
@@ -1532,6 +1680,26 @@ async function muatDataVisualisasi() {
 async function bukaRincianKategori(jenis, kunci, labelTampil) {
   document.getElementById("modalRincianOverlay")?.remove(); // jaga-jaga dobel klik cepat
 
+  // FITUR BARU (13 Agu 2026): "Lainnya" tetap pakai tampilan daftar
+  // sederhana (bukan matriks bulanan) - labelnya sendiri gabungan banyak
+  // teks Keterangan berbeda, jadi tidak ada satu "kategori per bulan"
+  // yang bermakna untuk dipecah. Kategori resmi (stat/keterangan) sekarang
+  // defaultnya tabel Jan..Des + Total per pegawai, mengikuti tahun yang
+  // dipilih (independen dari filter Batch/Periode di halaman utama,
+  // karena tabel bulanan itu sendiri sudah menunjukkan seluruh tahun).
+  const modeBulanan = jenis !== "lainnya";
+
+  // Tahun awal: kalau filter utama sedang di satu tahun spesifik, pakai
+  // itu; kalau tidak (mis. "Seluruh Batch" atau satu batch spesifik),
+  // pakai tahun berjalan sebagai titik awal yang masuk akal.
+  let tahunAwal = String(new Date().getFullYear());
+  if (filterVisualisasiSaatIni.mode === "tahun" && filterVisualisasiSaatIni.value) {
+    tahunAwal = filterVisualisasiSaatIni.value;
+  }
+
+  const daftarTahun = modeBulanan ? await api("/api/tahun-tersedia") : [];
+  if (daftarTahun.length && !daftarTahun.includes(tahunAwal)) tahunAwal = daftarTahun[0];
+
   const overlay = document.createElement("div");
   overlay.id = "modalRincianOverlay";
   overlay.className = "modal-overlay";
@@ -1540,7 +1708,7 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
       ? "Label Keterangan yang belum ada di daftar kategori resmi - kemungkinan perlu dimigrasikan/dikoreksi"
       : filterVisualisasiSaatIni.label;
   overlay.innerHTML = `
-    <div class="modal-box">
+    <div class="modal-box" style="${modeBulanan ? "width:980px" : ""}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px">
         <div>
           <p style="font-size:15px;font-weight:700;margin:0" class="judul-serif">Rincian ${labelTampil}</p>
@@ -1550,8 +1718,13 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0 10px">
         <input type="text" id="rincianCari" placeholder="Cari nama atau NIP..." style="flex:1;min-width:180px" />
+        ${
+          modeBulanan
+            ? `<select id="rincianTahun" style="width:auto">${daftarTahun.map((t) => `<option value="${t}" ${t === tahunAwal ? "selected" : ""}>Tahun ${t}</option>`).join("") || `<option value="${tahunAwal}">Tahun ${tahunAwal}</option>`}</select>`
+            : ""
+        }
         <div class="toggle-urut">
-          <button type="button" class="toggle-urut-btn active" data-urut="jumlah">Jumlah terbanyak</button>
+          <button type="button" class="toggle-urut-btn active" data-urut="jumlah">${modeBulanan ? "Total terbanyak" : "Jumlah terbanyak"}</button>
           <button type="button" class="toggle-urut-btn" data-urut="nama">Nama (A-Z)</button>
         </div>
         <button type="button" class="btn-sekunder" id="btnUnduhRincian">${ICONS.download || "⬇"} Unduh laporan</button>
@@ -1567,39 +1740,125 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
     if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", escHandler); }
   });
 
-  const paramsAmbil = new URLSearchParams({
-    filter_mode: filterVisualisasiSaatIni.mode,
-    filter_value: filterVisualisasiSaatIni.value || "",
-  });
-  if (jenis === "stat") {
-    paramsAmbil.set("jenis", "stat");
-    paramsAmbil.set("field", kunci);
-  } else if (jenis === "lainnya") {
-    paramsAmbil.set("jenis", "lainnya");
-  } else {
-    paramsAmbil.set("jenis", "keterangan");
-    paramsAmbil.set("label", kunci);
-  }
-
-  const data = await api(`/api/visualisasi/rincian?${paramsAmbil.toString()}`);
-  if (!overlay.isConnected) return; // modal sudah ditutup sebelum data selesai dimuat
   let urutSaatIni = "jumlah";
-  const adaLabelAsli = jenis === "lainnya"; // kolom tambahan khusus kategori "Lainnya"
+  let data = [];
+  let bulanLabel = [];
+  let tahunSaatIni = tahunAwal;
+
+  async function muatData() {
+    document.getElementById("rincianIsi").innerHTML = '<p class="loading-text">Memuat...</p>';
+    if (modeBulanan) {
+      const p = new URLSearchParams({ tahun: tahunSaatIni });
+      if (jenis === "stat") { p.set("jenis", "stat"); p.set("field", kunci); }
+      else { p.set("jenis", "keterangan"); p.set("label", kunci); }
+      const hasil = await api(`/api/visualisasi/rincian-bulanan?${p.toString()}`);
+      data = hasil.data || [];
+      bulanLabel = hasil.bulan_label || [];
+    } else {
+      const p = new URLSearchParams({
+        filter_mode: filterVisualisasiSaatIni.mode,
+        filter_value: filterVisualisasiSaatIni.value || "",
+        jenis: "lainnya",
+      });
+      data = await api(`/api/visualisasi/rincian?${p.toString()}`);
+    }
+    if (!overlay.isConnected) return; // modal sudah ditutup sebelum data selesai dimuat
+    renderIsiRincian();
+  }
 
   function renderIsiRincian() {
     const kataKunci = (document.getElementById("rincianCari")?.value || "").trim().toLowerCase();
     let tampil = (data || []).filter(
       (d) => !kataKunci || `${d.nama || ""} ${d.nip || ""} ${d.label_asli || ""}`.toLowerCase().includes(kataKunci)
     );
-    tampil = [...tampil].sort((a, b) =>
-      urutSaatIni === "nama" ? (a.nama || "").localeCompare(b.nama || "") : (b.jumlah || 0) - (a.jumlah || 0)
-    );
+    const nilaiUrut = (d) => (modeBulanan ? d.total || 0 : d.jumlah || 0);
+    tampil = [...tampil].sort((a, b) => (urutSaatIni === "nama" ? (a.nama || "").localeCompare(b.nama || "") : nilaiUrut(b) - nilaiUrut(a)));
     const isi = document.getElementById("rincianIsi");
     if (!isi) return;
     if (!tampil.length) {
-      isi.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic;padding:14px 0">Tidak ada data untuk kategori ini pada cakupan yang dipilih.</p>`;
+      isi.innerHTML = `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic;padding:14px 0">${
+        modeBulanan ? "Belum ada data untuk kategori ini di tahun yang dipilih - akan otomatis terisi begitu batch bulan terkait diproses." : "Tidak ada data untuk kategori ini pada cakupan yang dipilih."
+      }</p>`;
       return;
     }
+
+    if (modeBulanan) {
+      // FITUR BARU (13 Agu 2026): matriks Nama x Jan..Des + Total. Kolom
+      // bulan yang belum ada batch-nya otomatis 0 (bukan kosong), dan
+      // makin lengkap terisi begitu makin banyak batch bulan itu
+      // diproses - jadi tabel ini "hidup", terus mengikuti data terbaru.
+      //
+      // PERBAIKAN (14 Agu 2026): dulu kolom bulan pakai satuan "fr"
+      // (proporsional terhadap ruang tersisa) - itu bisa dibulatkan beda
+      // beberapa desimal piksel antar baris tergantung render browser,
+      // jadi kelihatan "hampir sejajar tapi tidak pas". Sekarang kolom
+      // Nama/NIP tetap fleksibel, tapi kolom bulan & Total pakai lebar
+      // PIKSEL TETAP (bukan proporsional) - dijamin presisi sejajar
+      // sempurna di setiap baris, tidak peduli isi kolom lain. Ditambah
+      // garis pemisah tipis antar kolom & warna selang-seling baris
+      // supaya lebih mudah "menyusuri" satu baris ke kanan dengan mata.
+      //
+      // PERBAIKAN (18 Agu 2026): dulu ada DUA kotak scroll bersarang -
+      // kotak luar digeser ke SAMPING (overflow-x:auto) sementara kotak
+      // dalam digeser ke BAWAH secara terpisah (overflow-y:auto). Scrollbar
+      // vertikal milik kotak dalam memakan sebagian lebarnya sendiri, tapi
+      // kotak luar menghitung lebar total pakai ukuran yang belum
+      // dikurangi itu - hasilnya kolom TOTAL paling kanan jadi tumpang
+      // tindih dengan scrollbar vertikal, dan tampak ada dua "penggeser"
+      // sekaligus di bawah tabel. Sekarang cuma SATU kotak yang menangani
+      // scroll ke segala arah (overflow:auto) - header & tiap baris selalu
+      // dijamin sejajar persis, dan cuma ada satu scrollbar horizontal +
+      // satu scrollbar vertikal, di tepi kotak yang sama.
+      const LEBAR_BULAN = 54;
+      const LEBAR_TOTAL = 74;
+      const gridBulanan = `minmax(170px,1.8fr) minmax(130px,1.3fr) repeat(${bulanLabel.length}, ${LEBAR_BULAN}px) ${LEBAR_TOTAL}px`;
+      // PERBAIKAN (19 Agu 2026): "lebarMin" cuma menjumlahkan lebar KOLOM
+      // saja (170+130+lebar tiap bulan+total), padahal kotak baris (baik
+      // header maupun data) juga punya "column-gap:10px" DI ANTARA setiap
+      // kolom (lihat .tabel-header-baris/.tabel-baris di style.css) dan
+      // padding kiri-kanan 12px+12px lewat aturan CSS yang sama. Karena
+      // "lebarMin" yang lama tidak menghitung gap & padding itu, kotak
+      // baris jadi lebih SEMPIT dari kebutuhan sebenarnya - grid-nya
+      // "meluber" keluar kotak tanpa disadari. Akibatnya kolom-kolom
+      // paling kanan (DES, TOTAL) dirender di luar batas kotak header/
+      // baris, sehingga tidak ikut ke-cat warna latar biru header (atau
+      // warna selang-seling baris) begitu digeser sampai ujung kanan -
+      // padahal angkanya sendiri tetap kelihatan karena teks tidak
+      // "disembunyikan", cuma latar warnanya yang terputus. Sekarang gap
+      // & padding ikut dihitung supaya kotak selalu cukup lebar menampung
+      // seluruh kolom, termasuk warna latarnya.
+      const jumlahKolom = 2 + bulanLabel.length + 1; // NAMA + NIP + tiap bulan + TOTAL
+      const totalGapKolom = (jumlahKolom - 1) * 10; // column-gap:10px antar kolom
+      const paddingBarisKiriKanan = 24; // padding: 8px 12px -> 12px kiri + 12px kanan
+      const lebarMin = 300 + bulanLabel.length * LEBAR_BULAN + LEBAR_TOTAL + totalGapKolom + paddingBarisKiriKanan;
+      const gayaSelBulan = "text-align:center;border-left:1px solid var(--border);padding:0 4px";
+      isi.innerHTML = `
+        <div class="tabel-wrap" style="overflow:auto;max-height:52vh">
+          <div style="min-width:${lebarMin}px">
+            <div class="tabel-header-baris" style="grid-template-columns:${gridBulanan};position:sticky;top:0;z-index:1">
+              <span>NAMA</span><span>NIP</span>${bulanLabel.map((b) => `<span style="${gayaSelBulan}">${b.toUpperCase()}</span>`).join("")}<span style="${gayaSelBulan}">TOTAL</span>
+            </div>
+            ${tampil
+              .map((d, i) => {
+                const BULAN_URUT = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
+                const selBulan = BULAN_URUT.slice(0, bulanLabel.length)
+                  .map((b) => `<span style="${gayaSelBulan};${d[b] ? "font-weight:600;color:var(--teks-utama)" : "color:var(--teks-muted)"}">${d[b] || 0}</span>`)
+                  .join("");
+                return `<div class="tabel-baris" style="grid-template-columns:${gridBulanan};${i % 2 ? "background:var(--abu-bg)" : ""}">
+                  <span>${d.nama || "-"}</span><span style="color:var(--teks-muted);font-size:11.5px">${d.nip || "-"}</span>
+                  ${selBulan}
+                  <span style="${gayaSelBulan};font-weight:700;color:var(--biru)">${d.total}</span>
+                </div>`;
+              })
+              .join("")}
+          </div>
+        </div>
+        <p style="font-size:11px;color:var(--teks-muted);margin:8px 0 0">${tampil.length} pegawai ditampilkan · tahun ${tahunSaatIni} · kolom bulan otomatis terisi mengikuti batch yang sudah diproses.</p>
+      `;
+      return;
+    }
+
+    const adaLabelAsli = jenis === "lainnya";
     const grid = adaLabelAsli ? "0.5fr 1.8fr 1.2fr 1.3fr 1fr" : "0.5fr 2fr 1.4fr 1fr";
     isi.innerHTML = `
       <div class="tabel-wrap">
@@ -1622,8 +1881,12 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
     `;
   }
 
-  renderIsiRincian();
+  await muatData();
   document.getElementById("rincianCari").addEventListener("input", renderIsiRincian);
+  document.getElementById("rincianTahun")?.addEventListener("change", (e) => {
+    tahunSaatIni = e.target.value;
+    muatData();
+  });
   overlay.querySelectorAll(".toggle-urut-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       overlay.querySelectorAll(".toggle-urut-btn").forEach((b) => b.classList.remove("active"));
@@ -1634,20 +1897,19 @@ async function bukaRincianKategori(jenis, kunci, labelTampil) {
   });
 
   document.getElementById("btnUnduhRincian").addEventListener("click", () => {
+    if (modeBulanan) {
+      const p = new URLSearchParams({ tahun: tahunSaatIni, urut: urutSaatIni });
+      if (jenis === "stat") { p.set("jenis", "stat"); p.set("field", kunci); }
+      else { p.set("jenis", "keterangan"); p.set("label", kunci); }
+      window.location.href = `/api/visualisasi/rincian-bulanan/unduh?${p.toString()}`;
+      return;
+    }
     const paramsUnduh = new URLSearchParams({
       filter_mode: filterVisualisasiSaatIni.mode,
       filter_value: filterVisualisasiSaatIni.value || "",
       urut: urutSaatIni,
+      jenis: "lainnya",
     });
-    if (jenis === "stat") {
-      paramsUnduh.set("jenis", "stat");
-      paramsUnduh.set("field", kunci);
-    } else if (jenis === "lainnya") {
-      paramsUnduh.set("jenis", "lainnya");
-    } else {
-      paramsUnduh.set("jenis", "keterangan");
-      paramsUnduh.set("label", kunci);
-    }
     window.location.href = `/api/visualisasi/rincian/unduh?${paramsUnduh.toString()}`;
   });
 }
@@ -1756,7 +2018,15 @@ function renderDonutKeterangan(data) {
   // karena donat yang terlalu besar menyisakan terlalu sedikit ruang
   // horizontal untuk legenda, membuat label panjang seperti "Cuti Alasan
   // Penting" jadi terpotong ellipsis sampai tidak terbaca.
-  const r = 64, cx = 72, cy = 72, keliling = 2 * Math.PI * r;
+  //
+  // PERBAIKAN (13 Agu 2026): viewBox sebelumnya "0 0 144 144" dengan
+  // cx=cy=72 - padahal tepi terluar lingkaran (r + setengah stroke-width
+  // = 64 + 10.5 = 74.5) itu LEBIH BESAR dari jarak pusat ke tepi viewBox
+  // (72), jadi strokenya kepotong 2.5px di semua sisi (donat kelihatan
+  // "rata"/tidak bulat sempurna di tepinya). Sekarang viewBox & titik
+  // pusat diperbesar sedikit (cx=cy=80, viewBox 160) supaya ada margin
+  // aman (~5.5px) dan lingkarannya utuh bulat sempurna.
+  const r = 64, cx = 80, cy = 80, keliling = 2 * Math.PI * r;
   let sudutSoFar = 0;
 
   const segmen = entri.map(([label, jumlah], i) => {
@@ -1775,7 +2045,7 @@ function renderDonutKeterangan(data) {
 
   document.getElementById("donutChart").innerHTML = `
     <div style="position:relative;width:160px;height:160px;flex-shrink:0">
-      <svg width="160" height="160" viewBox="0 0 144 144" style="transform:rotate(-90deg)">${lingkaran}</svg>
+      <svg width="160" height="160" viewBox="0 0 160 160" style="transform:rotate(-90deg)">${lingkaran}</svg>
       <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
         <span style="font-size:23px;font-weight:700;color:var(--teks-utama)">${total}</span>
         <span style="font-size:11px;color:var(--teks-muted)">hari tercatat</span>
@@ -2016,26 +2286,6 @@ function renderTabelRekap(elId, data) {
     .join("");
 }
 
-function renderBarPerBidang(batches) {
-  const perBidang = {};
-  batches.forEach((b) => {
-    const key = b.nama_bidang || "Tanpa nama";
-    perBidang[key] = (perBidang[key] || 0) + b.jumlah_pegawai;
-  });
-  const maxNilai = Math.max(1, ...Object.values(perBidang));
-  document.getElementById("barPerBidang").innerHTML = Object.entries(perBidang)
-    .map(
-      ([bidang, jumlah]) => `<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--teks-sekunder);margin-bottom:6px">
-      <span style="width:80px">${bidang}</span>
-      <div style="flex:1;background:var(--abu-bg);border-radius:3px;height:10px">
-        <div style="width:${(jumlah / maxNilai) * 100}%;height:100%;background:var(--biru);border-radius:3px"></div>
-      </div>
-      <span style="width:30px;text-align:right">${jumlah}</span>
-    </div>`
-    )
-    .join("") || `<p style="font-size:12.5px;color:var(--teks-muted);font-style:italic">Belum ada data.</p>`;
-}
-
 // ---------------------------------------------------------------------
 // LOG AKTIVITAS (global)
 // ---------------------------------------------------------------------
@@ -2223,6 +2473,26 @@ function ubahTema() {
   document.getElementById("toggleTema")?.classList.toggle("aktif", temaBaru === "gelap");
 }
 
+async function sinkronkanRingkasan() {
+  const btn = document.getElementById("btnSinkronRingkasan");
+  const teksAsli = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Menyinkronkan...";
+  try {
+    const res = await api("/api/sinkronkan-ringkasan", { method: "POST" });
+    if (res && res.ok) {
+      alert(`Selesai - ${res.jumlah} baris Ringkasan Pegawai berhasil disinkronkan dengan Data Harian.`);
+    } else {
+      alert((res && res.pesan) || "Gagal menyinkronkan, coba lagi.");
+    }
+  } catch (e) {
+    alert("Gagal menghubungi server, coba lagi.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = teksAsli;
+  }
+}
+
 async function renderPengaturan() {
   const [keterangan, bidang] = await Promise.all([api("/api/keterangan"), api("/api/bidang")]);
   daftarKeteranganCache = keterangan;
@@ -2246,6 +2516,15 @@ async function renderPengaturan() {
           <svg class="ikon-bulan" viewBox="0 0 20 20" fill="none" width="12" height="12"><path d="M16.5 12.3A6.8 6.8 0 1 1 7.7 3.5a5.3 5.3 0 0 0 8.8 8.8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
         </span>
       </button>
+    </div>
+
+    <p style="font-size:11.5px;font-weight:700;letter-spacing:.3px;color:var(--teks-muted);margin:0 0 8px;text-transform:uppercase">Pemeliharaan Data</p>
+    <div class="kartu" style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <p class="stat-label" style="font-weight:600;margin-bottom:2px">Sinkronkan Ulang Ringkasan</p>
+        <p style="font-size:11px;color:var(--teks-muted);margin:0;max-width:520px">Hitung ulang statistik Ringkasan Pegawai (Terlambat, Sakit, Izin, Alpha, dst) dari Data Harian saat ini, untuk SEMUA batch sekaligus. Pakai ini kalau ada selisih angka antara donat Visualisasi dan kartu statistik di sebelahnya.</p>
+      </div>
+      <button type="button" class="btn-sekunder" id="btnSinkronRingkasan" onclick="sinkronkanRingkasan()">${ICONS.download || "⟳"} Sinkronkan Sekarang</button>
     </div>
 
     <p style="font-size:11.5px;font-weight:700;letter-spacing:.3px;color:var(--teks-muted);margin:0 0 8px;text-transform:uppercase">Data Master</p>

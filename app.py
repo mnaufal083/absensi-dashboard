@@ -21,7 +21,8 @@ from flask import (
 )
 from dotenv import load_dotenv
 from openpyxl import Workbook
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
 
 load_dotenv()
 
@@ -87,6 +88,76 @@ def master_required(view):
     return wrapped
 
 
+# ---------------------------------------------------------------------------
+# LAPORAN EXCEL RESMI (panel Rincian Kategori di Visualisasi)
+# FITUR BARU (14 Agu 2026): dulu file yang diunduh cuma judul + tabel polos
+# tanpa identitas maupun styling apa pun. Sekarang dipakai kop institusi +
+# tabel bergaris + header berwarna + baris total, konsisten dengan gaya
+# rekap resmi (rekap_resmi.py) yang sudah ada di aplikasi ini.
+# ---------------------------------------------------------------------------
+_WARNA_KOP = "1E3A8A"        # biru tua - nama institusi
+_WARNA_HEADER_TABEL = "2563EB"  # biru - header tabel
+_WARNA_ZEBRA = "F1F5F9"      # abu sangat muda - baris selang-seling
+_WARNA_TOTAL = "DBEAFE"      # biru muda - baris Total Keseluruhan
+_GARIS_TIPIS = Side(style="thin", color="CBD5E1")
+_BINGKAI_SEL = Border(left=_GARIS_TIPIS, right=_GARIS_TIPIS, top=_GARIS_TIPIS, bottom=_GARIS_TIPIS)
+
+
+def _kop_laporan_resmi(ws, jumlah_kolom, subjudul, konteks_periode):
+    """Kop resmi ala Kejaksaan Tinggi Jawa Tengah - dipakai semua laporan
+    Excel yang diunduh dari panel Rincian Kategori di Visualisasi, supaya
+    identitasnya konsisten dengan aplikasi, bukan lembar polos tanpa kop.
+    Return nomor baris tempat HEADER TABEL sebaiknya mulai ditulis."""
+    ws.sheet_view.showGridLines = False
+    huruf_akhir = get_column_letter(jumlah_kolom)
+
+    ws.merge_cells(f"A1:{huruf_akhir}1")
+    ws["A1"] = "KEJAKSAAN TINGGI JAWA TENGAH — BIDANG DASKRIMTI"
+    ws["A1"].font = Font(bold=True, size=13, color=_WARNA_KOP)
+    ws["A1"].alignment = Alignment(horizontal="center")
+
+    ws.merge_cells(f"A2:{huruf_akhir}2")
+    ws["A2"] = subjudul
+    ws["A2"].font = Font(bold=True, size=11.5)
+    ws["A2"].alignment = Alignment(horizontal="center")
+
+    ws.merge_cells(f"A3:{huruf_akhir}3")
+    ws["A3"] = konteks_periode
+    ws["A3"].font = Font(italic=True, size=9.5, color="64748B")
+    ws["A3"].alignment = Alignment(horizontal="center")
+
+    ws.merge_cells(f"A4:{huruf_akhir}4")
+    ws["A4"] = f"Dicetak dari Sistem Rekapitulasi Absensi pada {datetime.now().strftime('%d-%m-%Y %H:%M')}"
+    ws["A4"].font = Font(italic=True, size=9, color="94A3B8")
+    ws["A4"].alignment = Alignment(horizontal="center")
+
+    return 6  # baris 5 sengaja dikosongkan sebagai jarak nafas
+
+
+def _gaya_header_tabel(ws, baris, jumlah_kolom):
+    """Header tabel: teks putih tebal di atas latar biru, rata tengah,
+    berbingkai - dipanggil setelah menulis teks header di baris itu."""
+    for c in range(1, jumlah_kolom + 1):
+        sel = ws.cell(row=baris, column=c)
+        sel.font = Font(bold=True, color="FFFFFF", size=10)
+        sel.fill = PatternFill("solid", fgColor=_WARNA_HEADER_TABEL)
+        sel.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        sel.border = _BINGKAI_SEL
+    ws.row_dimensions[baris].height = 24
+
+
+def _gaya_baris_data(ws, baris, jumlah_kolom, kolom_rata_tengah, zebra=False):
+    """Satu baris data: berbingkai tipis semua sel, kolom yang diminta
+    (mis. kolom bulan/angka) dirata-tengah, selebihnya rata kiri, dengan
+    warna selang-seling (zebra) supaya mata gampang menyusuri satu baris."""
+    for c in range(1, jumlah_kolom + 1):
+        sel = ws.cell(row=baris, column=c)
+        sel.border = _BINGKAI_SEL
+        sel.alignment = Alignment(horizontal="center" if c in kolom_rata_tengah else "left", vertical="center")
+        if zebra:
+            sel.fill = PatternFill("solid", fgColor=_WARNA_ZEBRA)
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
@@ -138,17 +209,30 @@ def ringkasan_beranda():
 
     semua = db.daftar_batch()
     total_batch = len(semua)
-    perlu_ditinjau = len([b for b in semua if b["status"] == "draft"])
+    batch_draft = [b for b in semua if b["status"] == "draft"]
+    perlu_ditinjau = len(batch_draft)
     aktivitas = db.log_aktivitas(limit=8)
     statistik = db.statistik_ringkas(mode, value)
 
     return jsonify({
         "total_batch": total_batch,
         "perlu_ditinjau": perlu_ditinjau,
+        # FITUR BARU (19 Agu 2026): daftar RIL batch berstatus Draft (bukan
+        # cuma angkanya) - dibatasi 6 batch terbaru - supaya Beranda bisa
+        # menampilkan pintasan langsung "buka batch ini" alih-alih admin
+        # harus pindah ke tab Riwayat dulu untuk mencari sendiri batch mana
+        # saja yang masih Draft.
+        "batch_draft": batch_draft[:6],
         "total_pegawai": statistik["total_pegawai"],
+        "pegawai_unik": statistik["pegawai_unik"],
         "aktivitas_terbaru": aktivitas,
         "ranking_alpha": db.ranking_pegawai("alpha", mode, value, limit=15),
         "ranking_terlambat": db.ranking_pegawai("terlambat", mode, value, limit=15),
+        # FITUR BARU (19 Agu 2026): tren bulanan (sama seperti grafik garis
+        # di tab Visualisasi) ikut dikirim ke Beranda supaya bisa ditampilkan
+        # sebagai preview kecil + dipakai menghitung naik/turunnya Alpha
+        # dibanding bulan sebelumnya.
+        "tren": db.tren_bulanan(mode, value),
     })
 
 
@@ -478,7 +562,7 @@ def visualisasi():
         # dihapus dari halaman ini dan cuma tersisa Filter Batch - jadi
         # Tren Bulanan ikut mengikuti batch yang dipilih juga.
         "tren": db.tren_bulanan(mode, value),
-        "ranking_alpha": db.ranking_pegawai("alpha", mode, value, limit=10),
+        "ranking_alpha": db.ranking_pegawai("alpha", mode, value, limit=15),
         # PERBAIKAN (30 Jul 2026): tadinya 10, dinaikkan jadi 15 supaya
         # grafik batang Rekapitulasi Keterlambatan bisa memuat lebih banyak
         # pegawai sekaligus.
@@ -526,6 +610,26 @@ def api_visualisasi_rincian():
     return jsonify({"ok": False, "pesan": "Jenis rincian tidak dikenal."}), 400
 
 
+@app.route("/api/visualisasi/rincian-bulanan")
+@login_required
+def api_visualisasi_rincian_bulanan():
+    """FITUR BARU (13 Agu 2026): versi "tabel bulanan" panel rincian
+    kategori - per pegawai, dipecah Jan..Des untuk satu tahun tertentu +
+    kolom Total. Beda dari api_visualisasi_rincian yang cuma satu angka
+    total per pegawai (tidak dipecah per bulan)."""
+    jenis = request.args.get("jenis")  # 'stat' | 'keterangan'
+    tahun = request.args.get("tahun") or str(datetime.now().year)
+    if jenis == "stat":
+        field = request.args.get("field", "")
+        if field not in _FIELD_STAT_DIIZINKAN:
+            return jsonify({"ok": False, "pesan": "Field tidak dikenal."}), 400
+        return jsonify({"tahun": tahun, "bulan_label": db.BULAN_LABEL, "data": db.rincian_bulanan("stat", field, tahun)})
+    if jenis == "keterangan":
+        label = request.args.get("label", "")
+        return jsonify({"tahun": tahun, "bulan_label": db.BULAN_LABEL, "data": db.rincian_bulanan("keterangan", label, tahun)})
+    return jsonify({"ok": False, "pesan": "Jenis rincian tidak dikenal."}), 400
+
+
 @app.route("/api/visualisasi/rincian/unduh")
 @login_required
 def api_visualisasi_rincian_unduh():
@@ -557,32 +661,136 @@ def api_visualisasi_rincian_unduh():
     if urut == "nama":
         data = sorted(data, key=lambda x: (x.get("nama") or "").lower())
 
+    label_periode = value if mode in ("tahun", "batch") and value else "Seluruh Batch (akumulasi total)"
+    jumlah_kolom = 5 if kolom_label_asli else 4
     wb = Workbook()
     ws = wb.active
     ws.title = "Rincian"
-    label_periode = value if mode in ("tahun", "batch") and value else "Seluruh Batch"
-    lebar_kolom = "ABCDE" if kolom_label_asli else "ABCD"
-    ws.append([f"Rincian {judul} — {label_periode}"])
-    ws.merge_cells(f"A1:{lebar_kolom[-1]}1")
-    ws["A1"].font = Font(bold=True, size=13)
-    ws.append([])
+
+    baris = _kop_laporan_resmi(ws, jumlah_kolom, f"Rincian {judul}", f"{label_periode} · {len(data)} baris tercatat")
+
     header = ["No", "Nama", "NIP", "Label Asli", "Jumlah Hari"] if kolom_label_asli else ["No", "Nama", "NIP", "Jumlah Hari"]
-    ws.append(header)
-    for sel in ws[3]:
-        sel.font = Font(bold=True)
-    for i, d in enumerate(data, 1):
-        baris = [i, d.get("nama") or "-", d.get("nip") or "-"]
+    for c, teks in enumerate(header, 1):
+        ws.cell(row=baris, column=c, value=teks)
+    _gaya_header_tabel(ws, baris, jumlah_kolom)
+    baris += 1
+
+    kolom_tengah = {1, jumlah_kolom}  # No + Jumlah Hari rata tengah, sisanya rata kiri
+    for i, d in enumerate(data):
+        nilai_baris = [i + 1, d.get("nama") or "-", d.get("nip") or "-"]
         if kolom_label_asli:
-            baris.append(d.get("label_asli") or "-")
-        baris.append(d.get("jumlah") or 0)
-        ws.append(baris)
-    for kolom, lebar in zip(lebar_kolom, (5, 34, 22, 20, 12) if kolom_label_asli else (5, 34, 22, 12)):
-        ws.column_dimensions[kolom].width = lebar
+            nilai_baris.append(d.get("label_asli") or "-")
+        nilai_baris.append(d.get("jumlah") or 0)
+        for c, v in enumerate(nilai_baris, 1):
+            ws.cell(row=baris, column=c, value=v)
+        _gaya_baris_data(ws, baris, jumlah_kolom, kolom_tengah, zebra=(i % 2 == 1))
+        baris += 1
+
+    # Baris "Total Keseluruhan" - jumlah kolom Jumlah Hari, supaya laporan
+    # langsung kelihatan akumulasinya tanpa perlu dijumlah manual.
+    ws.cell(row=baris, column=2, value="TOTAL KESELURUHAN")
+    ws.merge_cells(start_row=baris, start_column=2, end_row=baris, end_column=jumlah_kolom - 1)
+    ws.cell(row=baris, column=jumlah_kolom, value=sum(d.get("jumlah") or 0 for d in data))
+    for c in range(1, jumlah_kolom + 1):
+        sel = ws.cell(row=baris, column=c)
+        sel.font = Font(bold=True)
+        sel.fill = PatternFill("solid", fgColor=_WARNA_TOTAL)
+        sel.border = _BINGKAI_SEL
+        sel.alignment = Alignment(horizontal="center" if c != 2 else "right", vertical="center")
+
+    lebar = (5, 34, 22, 20, 12) if kolom_label_asli else (5, 34, 22, 12)
+    for idx, w in enumerate(lebar, 1):
+        ws.column_dimensions[get_column_letter(idx)].width = w
 
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
     nama_file = f"rincian_{judul.replace(' ', '_')}.xlsx"
+    return send_file(
+        buf, as_attachment=True, download_name=nama_file,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/api/visualisasi/rincian-bulanan/unduh")
+@login_required
+def api_visualisasi_rincian_bulanan_unduh():
+    """Unduh versi bulanan (lihat api_visualisasi_rincian_bulanan) sebagai
+    laporan Excel - kolom Nama/NIP + Jan..Des + Total."""
+    jenis = request.args.get("jenis")
+    tahun = request.args.get("tahun") or str(datetime.now().year)
+    urut = request.args.get("urut", "jumlah")  # 'jumlah' (=Total) | 'nama'
+
+    if jenis == "stat":
+        field = request.args.get("field", "")
+        if field not in _FIELD_STAT_DIIZINKAN:
+            return jsonify({"ok": False, "pesan": "Field tidak dikenal."}), 400
+        judul = field.capitalize()
+        data = db.rincian_bulanan("stat", field, tahun)
+    elif jenis == "keterangan":
+        judul = request.args.get("label", "")
+        data = db.rincian_bulanan("keterangan", judul, tahun)
+    else:
+        return jsonify({"ok": False, "pesan": "Jenis rincian tidak dikenal."}), 400
+
+    if urut == "nama":
+        data = sorted(data, key=lambda x: (x.get("nama") or "").lower())
+
+    jumlah_kolom = 3 + len(db.BULAN_LABEL) + 1  # No, Nama, NIP, 12 bulan, Total
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Rincian Bulanan"
+
+    baris = _kop_laporan_resmi(
+        ws, jumlah_kolom,
+        f"Rincian {judul} per Bulan",
+        f"Tahun {tahun} · {len(data)} pegawai tercatat",
+    )
+
+    header = ["No", "Nama", "NIP"] + db.BULAN_LABEL + ["Total"]
+    for c, teks in enumerate(header, 1):
+        ws.cell(row=baris, column=c, value=teks)
+    _gaya_header_tabel(ws, baris, jumlah_kolom)
+    baris += 1
+
+    kolom_tengah = {1} | set(range(4, jumlah_kolom + 1))  # No + semua kolom bulan + Total
+    for i, d in enumerate(data):
+        nilai_baris = [i + 1, d.get("nama") or "-", d.get("nip") or "-"] + [d.get(b, 0) for b in db.BULAN_URUT] + [d.get("total", 0)]
+        for c, v in enumerate(nilai_baris, 1):
+            ws.cell(row=baris, column=c, value=v)
+        _gaya_baris_data(ws, baris, jumlah_kolom, kolom_tengah, zebra=(i % 2 == 1))
+        baris += 1
+
+    # Baris "Total Keseluruhan" - jumlah tiap kolom bulan + grand total,
+    # supaya laporan langsung kelihatan akumulasi seluruh pegawai tanpa
+    # perlu dijumlah manual di Excel.
+    ws.cell(row=baris, column=2, value="TOTAL KESELURUHAN")
+    ws.merge_cells(start_row=baris, start_column=2, end_row=baris, end_column=3)
+    for idx, b in enumerate(db.BULAN_URUT):
+        ws.cell(row=baris, column=4 + idx, value=sum(d.get(b, 0) for d in data))
+    ws.cell(row=baris, column=jumlah_kolom, value=sum(d.get("total", 0) for d in data))
+    for c in range(1, jumlah_kolom + 1):
+        sel = ws.cell(row=baris, column=c)
+        sel.font = Font(bold=True)
+        sel.fill = PatternFill("solid", fgColor=_WARNA_TOTAL)
+        sel.border = _BINGKAI_SEL
+        sel.alignment = Alignment(horizontal="center" if c != 2 else "right", vertical="center")
+
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 30
+    ws.column_dimensions["C"].width = 20
+    for idx in range(len(db.BULAN_LABEL)):
+        ws.column_dimensions[get_column_letter(4 + idx)].width = 6.5
+    ws.column_dimensions[get_column_letter(jumlah_kolom)].width = 9
+
+    # Bekukan panel: baris kop+header tidak ikut tergulung, kolom Nama/NIP
+    # tetap terlihat saat digeser ke kolom bulan yang jauh di kanan.
+    ws.freeze_panes = ws.cell(row=baris - len(data), column=4)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    nama_file = f"rincian_{judul.replace(' ', '_')}_bulanan_{tahun}.xlsx"
     return send_file(
         buf, as_attachment=True, download_name=nama_file,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -655,6 +863,19 @@ def api_pengaturan(kunci):
         db.set_pengaturan(kunci, nilai)
         return jsonify({"ok": True})
     return jsonify({"kunci": kunci, "nilai": db.ambil_pengaturan(kunci)})
+
+
+@app.route("/api/sinkronkan-ringkasan", methods=["POST"])
+@login_required
+def api_sinkronkan_ringkasan():
+    """FITUR BARU (13 Agu 2026): tombol "Sinkronkan Ulang Ringkasan" di
+    halaman Pengaturan - menghitung ulang statistik ringkasan_pegawai
+    (Alpha, Sakit, Izin, Terlambat, dst) untuk SEMUA pegawai/batch
+    sekaligus dari data harian saat ini, supaya sama persis dengan
+    hitungan yang dipakai donut chart Visualisasi. Bisa memakan waktu
+    untuk data yang sangat banyak (satu query per pegawai per batch)."""
+    jumlah = db.sinkronkan_semua_ringkasan()
+    return jsonify({"ok": True, "jumlah": jumlah})
 
 
 @app.route("/api/bidang/<int:bidang_id>", methods=["DELETE"])
